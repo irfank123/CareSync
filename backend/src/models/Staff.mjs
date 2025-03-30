@@ -33,7 +33,7 @@ const StaffSchema = new mongoose.Schema(
   }
 );
 
-// Update the updatedAt field on save
+//update the updatedAt field on save
 StaffSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();
