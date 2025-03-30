@@ -1,0 +1,25 @@
+#dependencies
+node_modules/
+
+#env
+.env
+
+#logs
+logs/
+*.log
+
+#runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+#ide
+.idea/
+.vscode/
+*.swp
+*.swo
+
+#os files
+.DS_Store
+Thumbs.db
