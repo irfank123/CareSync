@@ -1,9 +1,9 @@
-// src/services/clinicAuthService.js
+// src/services/clinicAuthService.mjs
 
 import jwt from 'jsonwebtoken';
-import { Clinic, User } from '../models';
-import { config } from '../config';
-import { emailService } from './emailService';
+import { Clinic, User } from '../models/index.mjs';
+import config from '../config/config.mjs';
+import emailService from './emailService.mjs';
 
 /**
  * Authentication service for clinic registration and login
@@ -25,8 +25,11 @@ class ClinicAuthService {
       // Create clinic admin user
       const adminUser = await User.create({
         email: clinicData.email,
-        name: clinicData.adminName || clinicData.name,
-        userType: 'clinic_admin',
+        firstName: clinicData.adminFirstName,
+        lastName: clinicData.adminLastName,
+        passwordHash: clinicData.password, // Will be hashed by pre-save hook
+        role: 'admin',
+        phoneNumber: clinicData.phoneNumber || '',
         emailVerified: false
       });
       
@@ -34,7 +37,7 @@ class ClinicAuthService {
       const clinic = await Clinic.create({
         name: clinicData.name,
         email: clinicData.email,
-        phone: clinicData.phone,
+        phone: clinicData.phoneNumber,
         address: clinicData.address,
         password: clinicData.password, // Will be hashed by pre-save hook
         adminUserId: adminUser._id,
@@ -61,6 +64,7 @@ class ClinicAuthService {
       
       return {
         clinic: this.sanitizeClinicData(clinic),
+        user: adminUser,
         token
       };
     } catch (error) {
@@ -83,6 +87,12 @@ class ClinicAuthService {
         throw new Error('Invalid credentials');
       }
       
+      // Find admin user
+      const adminUser = await User.findById(clinic.adminUserId);
+      if (!adminUser) {
+        throw new Error('Clinic admin user not found');
+      }
+      
       // Check password
       const isMatch = await clinic.comparePassword(password);
       if (!isMatch) {
@@ -103,6 +113,7 @@ class ClinicAuthService {
       
       return {
         clinic: this.sanitizeClinicData(clinic),
+        user: adminUser,
         token
       };
     } catch (error) {
@@ -143,6 +154,19 @@ class ClinicAuthService {
   }
   
   /**
+   * Remove sensitive data from user object
+   * @param {Object} user - User object
+   * @returns {Object} Sanitized user data
+   */
+  sanitizeUserData(user) {
+    const userObj = user.toObject ? user.toObject() : { ...user };
+    delete userObj.passwordHash;
+    delete userObj.resetPasswordToken;
+    delete userObj.resetPasswordExpire;
+    return userObj;
+  }
+  
+  /**
    * Send verification email to clinic
    * @param {string} email - Clinic email
    */
@@ -178,6 +202,13 @@ class ClinicAuthService {
       const clinic = await Clinic.findOne({ email });
       if (!clinic) {
         throw new Error('Clinic not found');
+      }
+      
+      // Find admin user
+      const adminUser = await User.findById(clinic.adminUserId);
+      if (adminUser) {
+        adminUser.emailVerified = true;
+        await adminUser.save();
       }
       
       // In a real implementation, we would check the verification code
@@ -219,6 +250,157 @@ class ClinicAuthService {
     } catch (error) {
       console.error('Verification submission error:', error);
       throw new Error('Could not submit verification documents');
+    }
+  }
+  
+  /**
+   * Update clinic verification status
+   * @param {string} clinicId - Clinic ID
+   * @param {string} status - New verification status
+   * @param {string} notes - Notes about the verification
+   * @returns {Object} Updated clinic
+   */
+  async updateVerificationStatus(clinicId, status, notes) {
+    try {
+      const clinic = await Clinic.findById(clinicId);
+      
+      if (!clinic) {
+        throw new Error('Clinic not found');
+      }
+      
+      const oldStatus = clinic.verificationStatus;
+      clinic.verificationStatus = status;
+      
+      if (status === 'verified') {
+        clinic.verificationCompletedAt = new Date();
+      }
+      
+      if (notes) {
+        // Save verification notes
+        clinic.verificationNotes = notes;
+      }
+      
+      await clinic.save();
+      
+      // Notify clinic about verification status change
+      try {
+        if (status === 'verified') {
+          await emailService.sendEmail({
+            to: clinic.email,
+            subject: 'Your Clinic Has Been Verified',
+            html: `
+              <h1>Congratulations!</h1>
+              <p>Your clinic has been verified successfully. You can now access all features of the platform.</p>
+            `
+          });
+        } else if (status === 'rejected') {
+          await emailService.sendEmail({
+            to: clinic.email,
+            subject: 'Clinic Verification Update',
+            html: `
+              <h1>Verification Update</h1>
+              <p>We're sorry, but your clinic verification has been rejected for the following reason:</p>
+              <p>${notes || 'No reason provided.'}</p>
+              <p>Please contact support for more information.</p>
+            `
+          });
+        }
+      } catch (emailError) {
+        console.error('Verification status notification email error:', emailError);
+      }
+      
+      return this.sanitizeClinicData(clinic);
+    } catch (error) {
+      console.error('Update clinic verification error:', error);
+      throw new Error('Could not update verification status');
+    }
+  }
+  
+  /**
+   * Handle forgot password for clinic
+   * @param {string} email - Clinic email
+   * @returns {boolean} Success status
+   */
+  async forgotPassword(email) {
+    try {
+      // Find admin user by clinic email
+      const clinic = await Clinic.findOne({ email });
+      
+      if (!clinic) {
+        // Always return success even if clinic not found to prevent email enumeration
+        return true;
+      }
+      
+      // Find the admin user for this clinic
+      const user = await User.findById(clinic.adminUserId);
+      
+      if (!user) {
+        return true;
+      }
+      
+      // Generate reset token
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      
+      // Hash token and store it
+      clinic.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+      clinic.resetPasswordExpire = Date.now() + config.auth.passwordResetExpiry;
+      
+      await clinic.save();
+      
+      // Create reset URL
+      const resetUrl = `${config.frontendUrl}/clinic/reset-password/${resetToken}`;
+      
+      // Send email
+      try {
+        await emailService.sendPasswordResetEmail(email, resetUrl);
+        return true;
+      } catch (emailError) {
+        // Reset token if email fails
+        clinic.resetPasswordToken = undefined;
+        clinic.resetPasswordExpire = undefined;
+        await clinic.save();
+        
+        console.error('Password reset email error:', emailError);
+        throw new Error('Email could not be sent');
+      }
+    } catch (error) {
+      console.error('Forgot password error:', error);
+      throw new Error('Server error while processing forgot password request');
+    }
+  }
+  
+  /**
+   * Reset clinic password with token
+   * @param {string} resetToken - Reset token
+   * @param {string} newPassword - New password
+   * @returns {boolean} Success status
+   */
+  async resetPassword(resetToken, newPassword) {
+    try {
+      // Hash the reset token
+      const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+      
+      // Find clinic with valid token
+      const clinic = await Clinic.findOne({
+        resetPasswordToken: hashedToken,
+        resetPasswordExpire: { $gt: Date.now() }
+      });
+      
+      if (!clinic) {
+        throw new Error('Invalid or expired token');
+      }
+      
+      // Set new password
+      clinic.password = newPassword;
+      clinic.resetPasswordToken = undefined;
+      clinic.resetPasswordExpire = undefined;
+      
+      await clinic.save();
+      
+      return true;
+    } catch (error) {
+      console.error('Reset password error:', error);
+      throw new Error(error.message || 'Password reset failed');
     }
   }
 }

@@ -3,22 +3,24 @@
 import auth0Config from './auth0Config.mjs';
 import dotenv from 'dotenv';
 
-//load environment variables
+// Load environment variables
 dotenv.config();
 
 // Main application configuration
-
 const config = {
-  //environment
+  // App
+  appName: process.env.APP_NAME || 'CareSync',
+  
+  // Environment
   env: process.env.NODE_ENV || 'development',
   
-  //server
+  // Server
   port: process.env.PORT || 5000,
   
-  //mongoDB connection string
+  // MongoDB connection string
   mongoURI: process.env.MONGO_URI,
   
-  //JWT
+  // JWT
   jwt: {
     secret: process.env.JWT_SECRET,
     expiresIn: process.env.JWT_EXPIRES_IN || '30d', // 30 days
@@ -29,21 +31,44 @@ const config = {
     }
   },
   
-  //CORS
+  // Auth
+  auth: {
+    // Paths that require clinic verification
+    clinicRestrictedRoutes: [
+      '/api/clinic/patients',
+      '/api/clinic/doctors',
+      '/api/clinic/appointments',
+      '/api/clinic/prescriptions'
+    ],
+    // Token blacklist TTL (time to live) in seconds
+    tokenBlacklistTTL: 86400, // 24 hours
+    // Account lockout threshold
+    maxLoginAttempts: 5,
+    // Account lockout duration in milliseconds
+    accountLockoutDuration: 30 * 60 * 1000, // 30 minutes
+    // Password reset token expiry in milliseconds
+    passwordResetExpiry: 60 * 60 * 1000, // 1 hour
+    // Email verification token expiry in milliseconds
+    emailVerificationExpiry: 24 * 60 * 60 * 1000, // 24 hours
+    // MFA token expiry in milliseconds
+    mfaTokenExpiry: 10 * 60 * 1000 // 10 minutes
+  },
+  
+  // CORS
   cors: {
     origin: process.env.CORS_ORIGIN || '*',
     credentials: true
   },
   
-  //Auth0
+  // Auth0
   auth0: auth0Config,
   
-  //frontend URL
+  // Frontend URL
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
   
-  //fmail
+  // Email
   email: {
-    from: process.env.EMAIL_FROM,
+    from: process.env.EMAIL_FROM || 'noreply@caresync.example.com',
     service: process.env.EMAIL_SERVICE,
     host: process.env.EMAIL_HOST,
     port: process.env.EMAIL_PORT,
@@ -84,7 +109,7 @@ const config = {
   }
 };
 
-//validate essential configuration
+// Validate essential configuration
 const validateConfig = () => {
   const requiredVars = [
     { key: 'mongoURI', name: 'MONGO_URI' },
@@ -97,7 +122,7 @@ const validateConfig = () => {
   const missingVars = [];
   
   requiredVars.forEach(({ key, name }) => {
-    //check nested properties 
+    // Check nested properties 
     const value = key.split('.').reduce((obj, path) => obj && obj[path], config);
     
     if (!value) {
@@ -111,7 +136,7 @@ const validateConfig = () => {
     console.error('Please set these environment variables and restart the server.');
     
     if (process.env.NODE_ENV === 'production') {
-      //exit in production to prevent insecure deployment
+      // Exit in production to prevent insecure deployment
       process.exit(1);
     } else {
       console.warn('⚠️ Running in development mode with missing variables. This is not recommended.');

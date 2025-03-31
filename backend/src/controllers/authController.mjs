@@ -101,18 +101,65 @@ export const auth0Callback = asyncHandler(async (req, res, next) => {
  * @route   POST /api/auth/logout
  * @access  Private
  */
+/**
+ * @desc    Logout user and clear cookie
+ * @route   POST /api/auth/logout
+ * @access  Private
+ */
 export const logout = asyncHandler(async (req, res, next) => {
-  res.cookie('token', 'none', {
-    expires: new Date(Date.now() + 10 * 1000), // 10 seconds
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict'
-  });
-  
-  res.status(200).json({
-    success: true,
-    message: 'Logged out successfully'
-  });
+  try {
+    // Get token from cookies or authorization header
+    const token = req.cookies.token || 
+      (req.headers.authorization && req.headers.authorization.startsWith('Bearer ') 
+        ? req.headers.authorization.split(' ')[1] 
+        : null);
+    
+    // If token exists, add it to blacklist
+    if (token) {
+      // Extract the expiry time from the token
+      const decodedToken = jwt.decode(token);
+      const tokenExpiry = decodedToken && decodedToken.exp 
+        ? new Date(decodedToken.exp * 1000) 
+        : new Date(Date.now() + 24 * 60 * 60 * 1000); // Default to 24h
+        
+      await tokenBlacklistService.addToBlacklist(
+        token, 
+        req.user._id, 
+        tokenExpiry
+      );
+      
+      // Create audit log
+      await AuditLog.create({
+        userId: req.user._id,
+        action: 'logout',
+        resource: 'user',
+        details: {
+          ip: req.ip,
+          userAgent: req.headers['user-agent']
+        }
+      });
+    }
+    
+    // Clear the cookie regardless
+    res.cookie('token', 'none', {
+      expires: new Date(Date.now() + 10 * 1000), // 10 seconds
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    });
+    
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  } catch (error) {
+    console.error('Logout error:', error);
+    // Still return success to client even if blacklisting failed
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully'
+    });
+  }
 });
 
 /**
