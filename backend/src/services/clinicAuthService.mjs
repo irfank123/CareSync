@@ -253,13 +253,14 @@ class ClinicAuthService {
     }
   }
   
+
   /**
-   * Update clinic verification status
-   * @param {string} clinicId - Clinic ID
-   * @param {string} status - New verification status
-   * @param {string} notes - Notes about the verification
-   * @returns {Object} Updated clinic
-   */
+ * Update clinic verification status
+ * @param {string} clinicId - Clinic ID
+ * @param {string} status - New verification status
+ * @param {string} notes - Notes about the verification
+ * @returns {Object} Updated clinic
+ */
   async updateVerificationStatus(clinicId, status, notes) {
     try {
       const clinic = await Clinic.findById(clinicId);
@@ -284,27 +285,7 @@ class ClinicAuthService {
       
       // Notify clinic about verification status change
       try {
-        if (status === 'verified') {
-          await emailService.sendEmail({
-            to: clinic.email,
-            subject: 'Your Clinic Has Been Verified',
-            html: `
-              <h1>Congratulations!</h1>
-              <p>Your clinic has been verified successfully. You can now access all features of the platform.</p>
-            `
-          });
-        } else if (status === 'rejected') {
-          await emailService.sendEmail({
-            to: clinic.email,
-            subject: 'Clinic Verification Update',
-            html: `
-              <h1>Verification Update</h1>
-              <p>We're sorry, but your clinic verification has been rejected for the following reason:</p>
-              <p>${notes || 'No reason provided.'}</p>
-              <p>Please contact support for more information.</p>
-            `
-          });
-        }
+        await emailService.sendClinicVerificationEmail(clinic, status, notes);
       } catch (emailError) {
         console.error('Verification status notification email error:', emailError);
       }
@@ -403,6 +384,21 @@ class ClinicAuthService {
       throw new Error(error.message || 'Password reset failed');
     }
   }
+
+  /**
+ * Send verification email to clinic
+ * @param {string} email - Clinic email
+ */
+  async sendVerificationEmail(email) {
+    // Generate verification code
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Store verification code (would typically be saved in database with expiry)
+    // For now, we'll use a placeholder
+    
+    // Send email via email service
+    return await emailService.sendVerificationEmail(email, verificationCode);
+ }
 }
 
 export default new ClinicAuthService();

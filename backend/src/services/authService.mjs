@@ -744,7 +744,7 @@ class AuthService {
     // Here, you would typically store this code in the database
     // associated with the user and with an expiration time
     
-    // For now, let's just send the email
+    // Use the templated email service
     try {
       await emailService.sendVerificationEmail(email, verificationCode);
       return true;
