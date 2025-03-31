@@ -7,7 +7,12 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
+import mongoSanitize from 'express-mongo-sanitize';
+import xss from 'xss-clean';
+import hpp from 'hpp';
+import { v4 as uuidv4 } from 'uuid';
 import config from './config/config.mjs';
+import { globalErrorHandler } from './utils/errorHandler.mjs';
 import authRoutes from './routes/authRoutes.mjs';
 import adminRoutes from './routes/adminRoutes.mjs';
 
@@ -22,10 +27,19 @@ mongoose.connect(config.mongoURI)
   .catch(err => {
     console.error('MongoDB Connection Error:', err);
     process.exit(1);
-  });
+});
+
+//assign unique ID to each request (for logging/tracking)
+app.use((req, res, next) => {
+  req.id = uuidv4();
+  next();
+});
 
 //security middleware
 app.use(helmet()); // Set security headers
+app.use(xss()); // Sanitize inputs
+app.use(mongoSanitize()); // Prevent MongoDB injection
+app.use(hpp()); // Prevent HTTP parameter pollution
 
 //rate limiting
 const limiter = rateLimit({
@@ -81,18 +95,8 @@ app.use((req, res, next) => {
   });
 });
 
-//error handling middleware
-app.use((err, req, res, next) => {
-  console.error(`[${new Date().toISOString()}] Error:`, err);
-  
-  const statusCode = err.statusCode || 500;
-  
-  res.status(statusCode).json({
-    success: false,
-    message: err.message || 'Internal Server Error',
-    error: config.env === 'development' ? err : {}
-  });
-});
+//global error handling middleware
+app.use(globalErrorHandler);
 
 //start server
 const PORT = config.port;

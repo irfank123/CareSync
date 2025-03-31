@@ -1,480 +1,378 @@
 // src/controllers/authController.mjs
 
-import { User, Patient, Doctor, Staff } from '../models/index.mjs';
-import { check, validationResult } from 'express-validator';
+import { validationResult } from 'express-validator';
 import authService from '../services/authService.mjs';
-import emailService from '../services/emailService.mjs';
-import crypto from 'crypto';
+import { asyncHandler, AppError, formatValidationErrors } from '../utils/errorHandler.mjs';
+import config from '../config/config.mjs';
 
 /**
- * @desc    Register new user (non-clinic)
+ * @desc    Register new user
  * @route   POST /api/auth/register
  * @access  Public
  */
-export const register = async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ 
-        success: false, 
-        errors: errors.array() 
-      });
-    }
-
-    const { firstName, lastName, email, password, role, phoneNumber } = req.body;
-
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'User with this email already exists'
-      });
-    }
-
-    // Create user
-    const user = new User({
-      firstName,
-      lastName,
-      email,
-      passwordHash: password, // Will be hashed by the pre-save hook
-      role,
-      phoneNumber,
-      isActive: true
-    });
-
-    await user.save();
-
-    // Create role-specific records
-    if (role === 'patient') {
-      // Create Patient record with basic info
-      // You would need to complete profile later
-      await Patient.create({
-        userId: user._id,
-        dateOfBirth: req.body.dateOfBirth || new Date(),
-        gender: req.body.gender || 'other'
-      });
-    } else if (role === 'doctor') {
-      // Create Doctor record with basic info
-      // You would need to complete profile later
-      await Doctor.create({
-        userId: user._id,
-        specialties: req.body.specialties || [],
-        licenseNumber: req.body.licenseNumber || 'TO_BE_VERIFIED',
-        appointmentFee: req.body.appointmentFee || 0
-      });
-    } else if (role === 'staff') {
-      // Create Staff record
-      await Staff.create({
-        userId: user._id,
-        position: req.body.position || 'other',
-        department: req.body.department || 'General'
-      });
-    }
-
-    // Try to send welcome email
-    try {
-      await emailService.sendWelcomeEmail(user.email, user.firstName, user.role);
-    } catch (emailError) {
-      console.error('Welcome email error:', emailError);
-      // Continue registration even if email fails
-    }
-
-    // Generate token and send response
-    sendTokenResponse(user, 201, res);
-  } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error during registration'
-    });
+export const register = asyncHandler(async (req, res, next) => {
+  // Check for validation errors
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json(formatValidationErrors(errors.array()));
   }
-};
+
+  const { user, roleSpecificRecord, token } = await authService.registerUser(
+    req.body,
+    req.body.role
+  );
+
+  // Send response with cookie
+  sendTokenResponse(user, 201, res, token);
+});
 
 /**
- * @desc    Login user and return token
+ * @desc    Login user
  * @route   POST /api/auth/login
  * @access  Public
  */
-export const login = async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ 
-        success: false, 
-        errors: errors.array() 
-      });
-    }
+export const login = asyncHandler(async (req, res, next) => {
+  // Check for validation errors
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json(formatValidationErrors(errors.array()));
+  }
 
-    const { email, password } = req.body;
-
-    // Find user by email
-    const user = await User.findOne({ email }).select('+passwordHash');
-
-    // Check if user exists
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid credentials'
-      });
-    }
-
-    // Check if password matches
-    const isMatch = await user.matchPassword(password);
-    if (!isMatch) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid credentials'
-      });
-    }
-
-    // Update last login
-    user.lastLogin = Date.now();
-    await user.save();
-
-    // Send response with cookie
-    sendTokenResponse(user, 200, res);
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error during login'
+  const { email, password } = req.body;
+  
+  const result = await authService.loginUser(email, password);
+  
+  // If MFA is required, return partial response
+  if (result.requiresMfa) {
+    return res.status(200).json({
+      success: true,
+      requiresMfa: true,
+      user: result.user
     });
   }
-};
+  
+  // Send response with cookie
+  sendTokenResponse(result.user, 200, res, result.token, result.roleData);
+});
+
+/**
+ * @desc    Verify MFA code
+ * @route   POST /api/auth/verify-mfa
+ * @access  Public
+ */
+export const verifyMfa = asyncHandler(async (req, res, next) => {
+  // Check for validation errors
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json(formatValidationErrors(errors.array()));
+  }
+
+  const { email, mfaCode } = req.body;
+  
+  const result = await authService.verifyMfa(email, mfaCode);
+  
+  // Send response with cookie
+  sendTokenResponse(result.user, 200, res, result.token, result.roleData);
+});
 
 /**
  * @desc    Handle Auth0 callback
  * @route   POST /api/auth/auth0/callback
  * @access  Public
  */
-export const auth0Callback = async (req, res) => {
-  try {
-    const { userType } = req.body;
-    
-    if (userType !== 'patient' && userType !== 'doctor') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid user type. Must be patient or doctor.'
-      });
-    }
-    
-    // Process Auth0 login and create/update user
-    const { user, token } = await authService.handleAuth0Login(
-      req.auth0User,
-      userType
-    );
-    
-    // Send response
-    res.status(200).json({
-      success: true,
-      user,
-      token
-    });
-  } catch (error) {
-    console.error('Auth0 callback error:', error);
-    res.status(400).json({
-      success: false,
-      message: error.message || 'Authentication failed'
-    });
+export const auth0Callback = asyncHandler(async (req, res, next) => {
+  const { userType } = req.body;
+  
+  if (userType !== 'patient' && userType !== 'doctor') {
+    throw new AppError('Invalid user type. Must be patient or doctor.', 400);
   }
-};
+  
+  const { user, token } = await authService.handleAuth0Login(
+    req.auth0User,
+    userType
+  );
+  
+  // Send response with cookie
+  sendTokenResponse(user, 200, res, token);
+});
 
 /**
- * @desc    Logout user and clear cookie
+ * @desc    Logout user
  * @route   POST /api/auth/logout
  * @access  Private
  */
-export const logout = (req, res) => {
+export const logout = asyncHandler(async (req, res, next) => {
   res.cookie('token', 'none', {
-    expires: new Date(Date.now() + 10 * 1000), // Expires in 10 seconds
-    httpOnly: true
+    expires: new Date(Date.now() + 10 * 1000), // 10 seconds
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict'
   });
   
   res.status(200).json({
     success: true,
     message: 'Logged out successfully'
   });
-};
+});
 
 /**
- * @desc    Get current logged in user
+ * @desc    Get current user profile
  * @route   GET /api/auth/me
  * @access  Private
  */
-export const getMe = async (req, res) => {
-  try {
-    // For regular users, get full profile based on role
-    let userData = req.user;
-    
-    if (req.user.role === 'patient') {
-      userData = await User.findById(req.user._id).populate('Patient');
-    } else if (req.user.role === 'doctor') {
-      userData = await User.findById(req.user._id).populate('Doctor');
-    } else if (req.user.role === 'staff') {
-      userData = await User.findById(req.user._id).populate('Staff');
-    }
-    
-    res.status(200).json({ 
-      success: true, 
-      user: userData,
-      userType: req.user.role
-    });
-  } catch (error) {
-    console.error('Get user profile error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while fetching user profile'
-    });
-  }
-};
+export const getMe = asyncHandler(async (req, res, next) => {
+  const { user, roleData } = await authService.getUserProfile(req.user._id);
+  
+  res.status(200).json({
+    success: true,
+    user,
+    roleData,
+    role: user.role
+  });
+});
 
 /**
  * @desc    Forgot password
  * @route   POST /api/auth/forgot-password
  * @access  Public
  */
-export const forgotPassword = async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ 
-        success: false, 
-        errors: errors.array() 
-      });
-    }
-    
-    const { email } = req.body;
-    
-    // Find user by email
-    const user = await User.findOne({ email });
-    
-    if (!user) {
-      // Always return success even if user not found to prevent email enumeration
-      return res.status(200).json({
-        success: true,
-        message: 'If an account with that email exists, a password reset link has been sent'
-      });
-    }
-    
-    // Generate reset token
-    const resetToken = user.getResetPasswordToken();
-    await user.save({ validateBeforeSave: false });
-    
-    // Create reset URL
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
-    
-    try {
-      await emailService.sendPasswordResetEmail(user.email, resetUrl);
-      
-      res.status(200).json({
-        success: true,
-        message: 'Password reset link sent'
-      });
-    } catch (error) {
-      user.resetPasswordToken = undefined;
-      user.resetPasswordExpire = undefined;
-      await user.save({ validateBeforeSave: false });
-      
-      throw new Error('Email could not be sent');
-    }
-  } catch (error) {
-    console.error('Forgot password error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while processing forgot password request'
-    });
+export const forgotPassword = asyncHandler(async (req, res, next) => {
+  // Check for validation errors
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json(formatValidationErrors(errors.array()));
   }
-};
+
+  const { email } = req.body;
+  
+  await authService.forgotPassword(email);
+  
+  res.status(200).json({
+    success: true,
+    message: 'If an account with that email exists, a password reset link has been sent'
+  });
+});
 
 /**
  * @desc    Reset password
  * @route   PUT /api/auth/reset-password/:resetToken
  * @access  Public
  */
-export const resetPassword = async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ 
-        success: false, 
-        errors: errors.array() 
-      });
-    }
-    
-    // Hash the token from params
-    const resetPasswordToken = crypto
-      .createHash('sha256')
-      .update(req.params.resetToken)
-      .digest('hex');
-    
-    // Find user by token
-    const user = await User.findOne({
-      resetPasswordToken,
-      resetPasswordExpire: { $gt: Date.now() }
-    });
-    
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid or expired token'
-      });
-    }
-    
-    // Set new password
-    user.passwordHash = req.body.password; // Will be hashed by pre-save hook
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpire = undefined;
-    
-    await user.save();
-    
-    // Return token
-    sendTokenResponse(user, 200, res);
-  } catch (error) {
-    console.error('Reset password error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while resetting password'
-    });
+export const resetPassword = asyncHandler(async (req, res, next) => {
+  // Check for validation errors
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json(formatValidationErrors(errors.array()));
   }
-};
+
+  const { password } = req.body;
+  const { resetToken } = req.params;
+  
+  const { user, token } = await authService.resetPassword(resetToken, password);
+  
+  // Send response with cookie
+  sendTokenResponse(user, 200, res, token);
+});
 
 /**
  * @desc    Update password for logged in user
  * @route   POST /api/auth/update-password
  * @access  Private
  */
-export const updatePassword = async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ 
-        success: false, 
-        errors: errors.array() 
-      });
-    }
-
-    // For regular users
-    const user = await User.findById(req.user._id).select('+passwordHash');
-    
-    // Check current password
-    const isMatch = await user.matchPassword(req.body.currentPassword);
-    if (!isMatch) {
-      return res.status(401).json({
-        success: false,
-        message: 'Current password is incorrect'
-      });
-    }
-    
-    // Set new password
-    user.passwordHash = req.body.newPassword;
-    await user.save();
-    
-    res.status(200).json({
-      success: true,
-      message: 'Password updated successfully'
-    });
-  } catch (error) {
-    console.error('Update password error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error while updating password'
-    });
+export const updatePassword = asyncHandler(async (req, res, next) => {
+  // Check for validation errors
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json(formatValidationErrors(errors.array()));
   }
-};
+
+  const { currentPassword, newPassword } = req.body;
+  
+  await authService.updatePassword(req.user._id, currentPassword, newPassword);
+  
+  res.status(200).json({
+    success: true,
+    message: 'Password updated successfully'
+  });
+});
 
 /**
- * @desc    Refresh JWT token
+ * @desc    Toggle MFA
+ * @route   POST /api/auth/toggle-mfa
+ * @access  Private
+ */
+export const toggleMfa = asyncHandler(async (req, res, next) => {
+  // Check for validation errors
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json(formatValidationErrors(errors.array()));
+  }
+
+  const { enable, method } = req.body;
+  
+  const { user } = await authService.toggleMfa(req.user._id, enable, method);
+  
+  res.status(200).json({
+    success: true,
+    message: enable ? 'MFA enabled successfully' : 'MFA disabled successfully',
+    user
+  });
+});
+
+/**
+ * @desc    Refresh token
  * @route   POST /api/auth/refresh-token
  * @access  Private
  */
-export const refreshToken = async (req, res) => {
-  try {
-    // For regular users
-    const token = req.user.getSignedJwtToken();
-    
-    // Set cookie and send response
-    const options = {
-      expires: new Date(Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000),
-      httpOnly: true
-    };
-    
-    if (process.env.NODE_ENV === 'production') {
-      options.secure = true;
-    }
-    
-    res.status(200)
-      .cookie('token', token, options)
-      .json({
-        success: true,
-        token
-      });
-  } catch (error) {
-    console.error('Token refresh error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Could not refresh token'
-    });
+export const refreshToken = asyncHandler(async (req, res, next) => {
+  let options = {};
+  
+  if (req.user.clinicId) {
+    options.clinicId = req.user.clinicId;
   }
-};
+  
+  const token = authService.refreshToken(req.user._id, req.user.role, options);
+  
+  // Send response with cookie
+  sendCookieToken(token, 200, res);
+  
+  res.status(200).json({
+    success: true,
+    token
+  });
+});
+
+/**
+ * @desc    Verify email
+ * @route   POST /api/auth/verify-email
+ * @access  Public
+ */
+export const verifyEmail = asyncHandler(async (req, res, next) => {
+  // Check for validation errors
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json(formatValidationErrors(errors.array()));
+  }
+
+  const { email, code } = req.body;
+  
+  await authService.verifyEmail(email, code);
+  
+  res.status(200).json({
+    success: true,
+    message: 'Email verified successfully'
+  });
+});
 
 /**
  * Helper function to send token response with cookie
  * @param {Object} user - User object
  * @param {Number} statusCode - HTTP status code
  * @param {Object} res - Express response object
+ * @param {String} token - JWT token
+ * @param {Object} roleData - Role-specific data
  */
-const sendTokenResponse = (user, statusCode, res) => {
-  // Create token
-  const token = user.getSignedJwtToken();
-
-  // Cookie options
-  const options = {
-    expires: new Date(Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000),
-    httpOnly: true
-  };
-
-  // Set secure flag in production
-  if (process.env.NODE_ENV === 'production') {
-    options.secure = true;
-  }
-
-  // Remove sensitive data
-  user.passwordHash = undefined;
-
-  res.status(statusCode)
-    .cookie('token', token, options)
-    .json({
-      success: true,
-      token,
-      user
-    });
+const sendTokenResponse = (user, statusCode, res, token, roleData = null) => {
+  // Set cookie
+  sendCookieToken(token, statusCode, res);
+  
+  // Send response
+  res.status(statusCode).json({
+    success: true,
+    token,
+    user,
+    roleData
+  });
 };
 
-// Export validation rules for use in routes
+/**
+ * Helper function to set cookie with token
+ * @param {String} token - JWT token
+ * @param {Number} statusCode - HTTP status code
+ * @param {Object} res - Express response object
+ */
+const sendCookieToken = (token, statusCode, res) => {
+  const cookieOptions = {
+    expires: new Date(Date.now() + config.jwt.cookieOptions.maxAge),
+    httpOnly: true,
+    secure: config.jwt.cookieOptions.secure,
+    sameSite: 'strict'
+  };
+  
+  res.cookie('token', token, cookieOptions);
+};
+
+// Export validation rules
+import { check } from 'express-validator';
+
 export const registerValidation = [
-  check('firstName', 'First name is required').not().isEmpty(),
-  check('lastName', 'Last name is required').not().isEmpty(),
-  check('email', 'Please include a valid email').isEmail(),
-  check('password', 'Password must be at least 6 characters').isLength({ min: 6 }),
+  check('firstName', 'First name is required').not().isEmpty().trim(),
+  check('lastName', 'Last name is required').not().isEmpty().trim(),
+  check('email', 'Please include a valid email').isEmail().normalizeEmail(),
+  check('password')
+    .isLength({ min: 8 })
+    .withMessage('Password must be at least 8 characters')
+    .matches(/\d/)
+    .withMessage('Password must contain a number')
+    .matches(/[A-Z]/)
+    .withMessage('Password must contain an uppercase letter')
+    .matches(/[a-z]/)
+    .withMessage('Password must contain a lowercase letter')
+    .matches(/[!@#$%^&*(),.?":{}|<>]/)
+    .withMessage('Password must contain a special character'),
   check('role', 'Role must be patient, doctor or staff').isIn(['patient', 'doctor', 'staff']),
-  check('phoneNumber', 'Phone number is required').not().isEmpty()
+  check('phoneNumber', 'Valid phone number is required').not().isEmpty().isMobilePhone()
 ];
 
 export const loginValidation = [
-  check('email', 'Please include a valid email').isEmail(),
-  check('password', 'Password is required').exists()
+  check('email', 'Please include a valid email').isEmail().normalizeEmail(),
+  check('password', 'Password is required').notEmpty()
+];
+
+export const mfaValidation = [
+  check('email', 'Please include a valid email').isEmail().normalizeEmail(),
+  check('mfaCode', 'Please provide a valid 6-digit code').isLength({ min: 6, max: 6 }).isNumeric()
 ];
 
 export const forgotPasswordValidation = [
-  check('email', 'Please include a valid email').isEmail()
+  check('email', 'Please include a valid email').isEmail().normalizeEmail(),
 ];
 
 export const resetPasswordValidation = [
-  check('password', 'Password must be at least 6 characters').isLength({ min: 6 })
+  check('password')
+    .isLength({ min: 8 })
+    .withMessage('Password must be at least 8 characters')
+    .matches(/\d/)
+    .withMessage('Password must contain a number')
+    .matches(/[A-Z]/)
+    .withMessage('Password must contain an uppercase letter')
+    .matches(/[a-z]/)
+    .withMessage('Password must contain a lowercase letter')
+    .matches(/[!@#$%^&*(),.?":{}|<>]/)
+    .withMessage('Password must contain a special character')
 ];
 
 export const updatePasswordValidation = [
-  check('currentPassword', 'Current password is required').exists(),
-  check('newPassword', 'New password must be at least 6 characters').isLength({ min: 6 })
+  check('currentPassword', 'Current password is required').notEmpty(),
+  check('newPassword')
+    .isLength({ min: 8 })
+    .withMessage('New password must be at least 8 characters')
+    .matches(/\d/)
+    .withMessage('New password must contain a number')
+    .matches(/[A-Z]/)
+    .withMessage('New password must contain an uppercase letter')
+    .matches(/[a-z]/)
+    .withMessage('New password must contain a lowercase letter')
+    .matches(/[!@#$%^&*(),.?":{}|<>]/)
+    .withMessage('New password must contain a special character')
+];
+
+export const toggleMfaValidation = [
+  check('enable', 'Enable flag must be a boolean').isBoolean(),
+  check('method', 'Method must be app or sms').optional().isIn(['app', 'sms'])
+];
+
+export const verifyEmailValidation = [
+  check('email', 'Please include a valid email').isEmail().normalizeEmail(),
+  check('code', 'Please provide a valid verification code').isLength({ min: 6, max: 6 }).isNumeric()
 ];
