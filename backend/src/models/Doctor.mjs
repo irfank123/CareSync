@@ -97,7 +97,5 @@ DoctorSchema.pre('save', function(next) {
   next();
 });
 
-module.exports = mongoose.model('Doctor', DoctorSchema);
-
 const Doctor = mongoose.model('Doctor', DoctorSchema);
 export default Doctor

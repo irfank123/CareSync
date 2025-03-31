@@ -60,7 +60,6 @@ const AssessmentSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model('Assessment', AssessmentSchema);
 
 const Appointment = mongoose.model('Assessment', AssessmentSchema);
 export default Appointment;
