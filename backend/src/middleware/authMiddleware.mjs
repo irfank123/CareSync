@@ -303,6 +303,7 @@ const authMiddleware = {
    * @param {Object} res - Express response object
    * @param {Function} next - Express next function
    */
+  
   verifyAuth0Token: async (req, res, next) => {
     try {
       // Get token from Authorization header
@@ -324,27 +325,52 @@ const authMiddleware = {
         });
       }
       
-      // In production, this would verify using Auth0's JWT verification
-      // For development, we'll use a simplified approach
-      
-      try {
-        // For development: simply decode the token
-        const decoded = jwt.decode(token);
-        
-        if (!decoded || !decoded.sub) {
-          throw new Error('Invalid token structure');
+      // In production environment
+      if (process.env.NODE_ENV === 'production') {
+        // Get Auth0 public key and verify token
+        // This is a simplified version - in production, you would use a library like jwks-rsa
+        try {
+          const decoded = jwt.verify(token, config.auth0.clientSecret, {
+            algorithms: ['RS256'],
+            audience: config.auth0.audience,
+            issuer: `https://${config.auth0.domain}/`
+          });
+          
+          if (!decoded || !decoded.sub) {
+            throw new Error('Invalid token structure');
+          }
+          
+          // Attach Auth0 user info to request
+          req.auth0User = decoded;
+          
+          next();
+        } catch (tokenError) {
+          console.error('Auth0 token verification error:', tokenError);
+          return res.status(401).json({ 
+            success: false,
+            message: 'Invalid authentication token' 
+          });
         }
-        
-        // Attach Auth0 user info to request
-        req.auth0User = decoded;
-        
-        next();
-      } catch (tokenError) {
-        console.error('Auth0 token decode error:', tokenError);
-        return res.status(401).json({ 
-          success: false,
-          message: 'Invalid authentication token' 
-        });
+      } else {
+        // For development: decode the token but add a warning
+        try {
+          const decoded = jwt.decode(token);
+          if (!decoded || !decoded.sub) {
+            throw new Error('Invalid token structure');
+          }
+          
+          console.warn(' DEVELOPMENT MODE: Auth0 token not cryptographically verified');
+          // Attach Auth0 user info to request
+          req.auth0User = decoded;
+          
+          next();
+        } catch (tokenError) {
+          console.error('Auth0 token decode error:', tokenError);
+          return res.status(401).json({ 
+            success: false,
+            message: 'Invalid authentication token' 
+          });
+        }
       }
     } catch (error) {
       console.error('Auth0 verification error:', error);
