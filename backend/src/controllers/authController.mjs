@@ -4,6 +4,9 @@ import { validationResult } from 'express-validator';
 import authService from '../services/authService.mjs';
 import { asyncHandler, AppError, formatValidationErrors } from '../utils/errorHandler.mjs';
 import config from '../config/config.mjs';
+import jwt from 'jsonwebtoken';
+import tokenBlacklistService from '../services/tokenBlacklistService.mjs';
+import { AuditLog } from '../models/index.mjs';
 
 /**
  * @desc    Register new user
