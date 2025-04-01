@@ -17,6 +17,7 @@ const router = express.Router();
 // Protect all routes in this router
 router.use(authMiddleware.authenticate);
 router.use(authMiddleware.restrictTo('admin'));
+router.use(authMiddleware.checkClinicStatus);
 
 // Clinic management routes
 router.get('/clinics', getClinics);

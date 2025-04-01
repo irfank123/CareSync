@@ -152,7 +152,7 @@ class StaffService {
         if (!mongoose.Types.ObjectId.isValid(staffId)) {
             throw new Error('Invalid ID format');
         }
-        
+
       // Use aggregation to get staff and user data in one query
       const staff = await Staff.aggregate([
         {
@@ -439,14 +439,22 @@ class StaffService {
    * @returns {boolean} Success status
    */
   async deleteStaff(staffId) {
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    let session = null;
     
     try {
+      // Start transaction
+      session = await mongoose.startSession();
+      session.startTransaction();
+      
+      // Validate ObjectId
+      if (!mongoose.Types.ObjectId.isValid(staffId)) {
+        throw new Error('Invalid staff ID format');
+      }
+      
       // Find the staff member first
       const staff = await Staff.findById(staffId);
       if (!staff) {
-        return false;
+        throw new Error('Staff member not found');
       }
       
       // Delete the staff record
@@ -466,11 +474,16 @@ class StaffService {
       return true;
     } catch (error) {
       // Abort transaction on error
-      await session.abortTransaction();
+      if (session) {
+        await session.abortTransaction();
+      }
       console.error('Delete staff error:', error);
-      throw new Error('Failed to delete staff member');
+      throw new Error(`Failed to delete staff member: ${error.message}`);
     } finally {
-      session.endSession();
+      // Always end the session
+      if (session) {
+        session.endSession();
+      }
     }
   }
 }

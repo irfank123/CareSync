@@ -362,8 +362,8 @@ export const refreshTokenClinic = async (req, res) => {
 
 // Export validation rules for use in routes
 export const registerClinicValidation = [
-  check('name', 'Clinic name is required').not().isEmpty(),
-  check('email', 'Please include a valid email').isEmail(),
+  check('name', 'Clinic name is required').not().isEmpty().trim(),
+  check('email', 'Please include a valid email').isEmail().normalizeEmail(),
   check('password')
     .isLength({ min: 8 })
     .withMessage('Password must be at least 8 characters')
@@ -375,9 +375,14 @@ export const registerClinicValidation = [
     .withMessage('Password must contain a lowercase letter')
     .matches(/[!@#$%^&*(),.?":{}|<>]/)
     .withMessage('Password must contain a special character'),
-  check('phoneNumber', 'Phone number is required').not().isEmpty(),
-  check('adminFirstName', 'Admin first name is required').not().isEmpty(),
-  check('adminLastName', 'Admin last name is required').not().isEmpty()
+  check('phoneNumber', 'Valid phone number is required').not().isEmpty().isMobilePhone(),
+  check('adminFirstName', 'Admin first name is required').not().isEmpty().trim(),
+  check('adminLastName', 'Admin last name is required').not().isEmpty().trim(),
+  check('address.street', 'Street address is required').optional().not().isEmpty(),
+  check('address.city', 'City is required').optional().not().isEmpty(),
+  check('address.state', 'State is required').optional().not().isEmpty(),
+  check('address.zipCode', 'ZIP code is required').optional().not().isEmpty(),
+  check('address.country', 'Country is required').optional().not().isEmpty()
 ];
 
 export const loginClinicValidation = [
