@@ -13,10 +13,14 @@ import hpp from 'hpp';
 import { v4 as uuidv4 } from 'uuid';
 import config from './config/config.mjs';
 import { globalErrorHandler } from './utils/errorHandler.mjs';
-import authRoutes from './routes/authRoutes.mjs';
-import adminRoutes from './routes/adminRoutes.mjs';
-
-
+import { 
+  authRoutes, 
+  adminRoutes, 
+  userRoutes, 
+  patientRoutes, 
+  doctorRoutes, 
+  staffRoutes 
+} from './routes/index.mjs';
 
 //initialize express app
 const app = express();
@@ -70,6 +74,10 @@ if (config.env === 'development') {
 //routes
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/patients', patientRoutes);
+app.use('/api/doctors', doctorRoutes);
+app.use('/api/staff', staffRoutes);
 
 //timestamp to all requests for logging
 app.use((req, res, next) => {
