@@ -32,9 +32,11 @@ class EmailService {
         }
       });
     } else {
-      // In development, log emails to console and/or use a test service
-      // like Ethereal (https://ethereal.email/) or Mailtrap
-      this.setupDevTransport();
+      // In development, set up a default transporter
+      // We'll initialize it properly when needed
+      this.transporter = null;
+      // Initialize asynchronously
+      this.initDevTransport();
     }
   }
   
@@ -266,5 +268,34 @@ class EmailService {
       html,
       text
     });
+  }
+  
+  //method to handle async initialization
+  async initDevTransport() {
+    try {
+      const testAccount = await nodemailer.createTestAccount();
+      
+      this.transporter = nodemailer.createTransport({
+        host: 'smtp.ethereal.email',
+        port: 587,
+        secure: false,
+        auth: {
+          user: testAccount.user,
+          pass: testAccount.pass
+        }
+      });
+      
+      console.log('Development email setup complete');
+      console.log('Test Email Account:', testAccount.user);
+    } catch (error) {
+      console.error('Failed to set up dev email transport:', error);
+      // Set up a dummy transport that logs emails
+      this.transporter = {
+        sendMail: (options) => {
+          console.log('Email would be sent:', options);
+          return Promise.resolve({ messageId: 'dev-mode-no-email-sent' });
+        }
+      };
+    }
   } 
 }
