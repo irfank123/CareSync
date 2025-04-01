@@ -111,35 +111,56 @@ const config = {
 
 // Validate essential configuration
 const validateConfig = () => {
-  const requiredVars = [
+  const criticalVars = [
     { key: 'mongoURI', name: 'MONGO_URI' },
-    { key: 'jwt.secret', name: 'JWT_SECRET' },
+    { key: 'jwt.secret', name: 'JWT_SECRET' }
+  ];
+  
+  const recommendedVars = [
     { key: 'auth0.domain', name: 'AUTH0_DOMAIN' },
     { key: 'auth0.clientId', name: 'AUTH0_CLIENT_ID' },
     { key: 'auth0.clientSecret', name: 'AUTH0_CLIENT_SECRET' }
   ];
   
-  const missingVars = [];
+  const missingCriticalVars = [];
+  const missingRecommendedVars = [];
   
-  requiredVars.forEach(({ key, name }) => {
+  criticalVars.forEach(({ key, name }) => {
     // Check nested properties 
     const value = key.split('.').reduce((obj, path) => obj && obj[path], config);
     
     if (!value) {
-      missingVars.push(name);
+      missingCriticalVars.push(name);
     }
   });
   
-  if (missingVars.length > 0) {
-    console.error('❌ Missing required environment variables:');
-    missingVars.forEach(name => console.error(`   - ${name}`));
-    console.error('Please set these environment variables and restart the server.');
+  recommendedVars.forEach(({ key, name }) => {
+    // Check nested properties 
+    const value = key.split('.').reduce((obj, path) => obj && obj[path], config);
+    
+    if (!value) {
+      missingRecommendedVars.push(name);
+    }
+  });
+  
+  if (missingCriticalVars.length > 0) {
+    console.error('Missing critical environment variables:');
+    missingCriticalVars.forEach(name => console.error(`   - ${name}`));
+    console.error('These variables are required for the application to function.');
+    
+    // Exit regardless of environment
+    process.exit(1);
+  }
+  
+  if (missingRecommendedVars.length > 0) {
+    console.warn('Missing recommended environment variables:');
+    missingRecommendedVars.forEach(name => console.warn(`   - ${name}`));
     
     if (process.env.NODE_ENV === 'production') {
-      // Exit in production to prevent insecure deployment
+      console.error('These variables are recommended for production use.');
       process.exit(1);
     } else {
-      console.warn('⚠️ Running in development mode with missing variables. This is not recommended.');
+      console.warn('Running in development mode with missing variables. Some features may not work.');
     }
   }
 };
