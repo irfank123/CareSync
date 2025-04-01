@@ -397,9 +397,13 @@ async getDoctorById(doctorId) {
   async updateDoctor(doctorId, updateData) {
     try {
       // Check if doctor exists
+      if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+        throw new Error('Invalid doctor ID format');
+      }
+      
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
-        return null;
+        throw new Error('Doctor not found');
       }
       
       // Update doctor
@@ -410,7 +414,7 @@ async getDoctorById(doctorId) {
       );
       
       if (!updatedDoctor) {
-        return null;
+        throw new Error('Doctor update failed');
       }
       
       // Create audit log
@@ -428,9 +432,10 @@ async getDoctorById(doctorId) {
       return this.getDoctorById(doctorId);
     } catch (error) {
       console.error('Update doctor error:', error);
-      throw new Error('Failed to update doctor');
+      throw new Error(`Failed to update doctor: ${error.message}`);
     }
   }
+  
 
   /**
    * Update doctor by user ID
