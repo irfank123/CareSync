@@ -164,12 +164,17 @@ class DoctorService {
   }
 
   /**
-   * Get doctor by ID
-   * @param {string} doctorId - Doctor ID
-   * @returns {Object} Doctor with user information
-   */
-  async getDoctorById(doctorId) {
+ * Get doctor by ID
+ * @param {string} doctorId - Doctor ID
+ * @returns {Object} Doctor with user information
+ */
+async getDoctorById(doctorId) {
     try {
+      // Validate ObjectId
+      if (!mongoose.Types.ObjectId.isValid(doctorId)) {
+        throw new Error('Invalid doctor ID format');
+      }
+      
       // Use aggregation to get doctor and user data in one query
       const doctor = await Doctor.aggregate([
         {
@@ -227,7 +232,7 @@ class DoctorService {
       return doctor[0];
     } catch (error) {
       console.error('Get doctor by ID error:', error);
-      throw new Error('Failed to retrieve doctor');
+      throw new Error(`Failed to retrieve doctor: ${error.message}`);
     }
   }
 
