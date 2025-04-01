@@ -1,4 +1,5 @@
 // src/config/auth0Config.mjs
+import { ManagementClient } from 'auth0';
 
 
 const auth0Config = {
@@ -22,25 +23,44 @@ const auth0Config = {
   
   
     //configure Auth0 Management API client
-  export const configureAuth0ManagementClient = () => {
-    // ============== placeholder===============================
-    
-    return {
-      getUser: async (userId) => {
-        console.log(`[PLACEHOLDER] Getting Auth0 user: ${userId}`);
-        return {}; //placeholder
-      },
-      
-      assignRoleToUser: async (userId, role) => {
-        console.log(`[PLACEHOLDER] Assigning role ${role} to user: ${userId}`);
-        return true; //placeholder
-      },
-      
-      createUser: async (userData) => {
-        console.log(`[PLACEHOLDER] Creating Auth0 user: ${userData.email}`);
-        return {}; //placeholder
+    export const configureAuth0ManagementClient = () => {
+      // Validate required configuration
+      if (!auth0Config.domain || !auth0Config.clientId || !auth0Config.clientSecret) {
+        console.error('Missing required Auth0 configuration');
+        throw new Error('Auth0 configuration incomplete');
       }
+      
+      // Create Auth0 Management client
+      const management = new ManagementClient({
+        domain: auth0Config.domain,
+        clientId: auth0Config.clientId,
+        clientSecret: auth0Config.clientSecret,
+        scope: 'read:users update:users create:users read:roles'
+      });
+      
+      return {
+        getUser: async (userId) => {
+          return await management.users.get({ id: userId });
+        },
+        
+        assignRoleToUser: async (userId, roleId) => {
+          return await management.users.assignRoles({ id: userId }, { roles: [roleId] });
+        },
+        
+        createUser: async (userData) => {
+          return await management.users.create({
+            email: userData.email,
+            password: userData.password,
+            connection: 'Username-Password-Authentication',
+            name: `${userData.firstName} ${userData.lastName}`,
+            given_name: userData.firstName,
+            family_name: userData.lastName,
+            metadata: {
+              role: userData.role
+            }
+          });
+        }
+      };
     };
-  };
   
   export default auth0Config;
