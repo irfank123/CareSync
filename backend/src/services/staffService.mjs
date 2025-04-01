@@ -148,6 +148,11 @@ class StaffService {
    */
   async getStaffById(staffId) {
     try {
+        // Validate ObjectId
+        if (!mongoose.Types.ObjectId.isValid(staffId)) {
+            throw new Error('Invalid ID format');
+        }
+        
       // Use aggregation to get staff and user data in one query
       const staff = await Staff.aggregate([
         {

@@ -169,6 +169,10 @@ class PatientService {
    */
   async getPatientById(patientId) {
     try {
+        //validate ObjectId
+        if (!mongoose.Types.ObjectId.isValid(patientId)) {
+            throw new Error('Invalid ID format');
+        }
       // Use aggregation to get patient and user data in one query
       const patient = await Patient.aggregate([
         {
@@ -384,6 +388,11 @@ class PatientService {
    */
   async updatePatient(patientId, updateData) {
     try {
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(patientId)) {
+        throw new Error('Invalid ID format');
+    }
+
       // Check if patient exists
       const patient = await Patient.findById(patientId);
       if (!patient) {

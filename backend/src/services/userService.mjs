@@ -82,6 +82,11 @@ class UserService {
    */
   async getUserById(userId) {
     try {
+      // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+        throw new Error('Invalid ID format');
+    }  
+    
       const user = await User.findById(userId)
         .select('-passwordHash -resetPasswordToken -resetPasswordExpire -emailVerificationToken -emailVerificationExpire');
       
