@@ -44,7 +44,7 @@ export const getDoctors = asyncHandler(async (req, res, next) => {
     clinicId: filterClinicId
   });
   
-  res.status(200).json({
+  return res.status(200).json({
     success: true,
     count: result.doctors.length,
     total: result.total,
