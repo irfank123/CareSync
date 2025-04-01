@@ -576,7 +576,7 @@ class DoctorService {
           const [startHour, startMinute] = daySchedule.startTime.split(':').map(Number);
           const [endHour, endMinute] = daySchedule.endTime.split(':').map(Number);
           
-          // Create slots based on appointment duration
+          // Use doctor's appointment duration or default
           const appointmentDuration = doctor.appointmentDuration || 30; // in minutes
           const slotStart = new Date(currentDate);
           slotStart.setHours(startHour, startMinute, 0, 0);
