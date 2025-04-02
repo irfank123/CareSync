@@ -7,6 +7,7 @@ import * as userController from './userController.mjs';
 import * as patientController from './patientController.mjs';
 import * as doctorController from './doctorController.mjs';
 import * as staffController from './staffController.mjs';
+import * as availabilityController from './availabilityController.mjs';
 
 export {
   authController,
@@ -15,5 +16,6 @@ export {
   userController,
   patientController,
   doctorController,
-  staffController
+  staffController,
+  availabilityController
 };

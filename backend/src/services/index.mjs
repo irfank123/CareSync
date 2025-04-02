@@ -8,6 +8,7 @@ import emailService from './emailService.mjs';
 import tokenBlacklistService from './tokenBlacklistService.mjs';
 import authService from './authService.mjs';
 import clinicAuthService from './clinicAuthService.mjs';
+import availabilityService from './availabilityService.mjs';
 
 export {
   userService,
@@ -17,5 +18,6 @@ export {
   emailService,
   tokenBlacklistService,
   authService,
-  clinicAuthService
+  clinicAuthService,
+  availabilityService
 };
