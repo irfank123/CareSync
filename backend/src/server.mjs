@@ -19,7 +19,9 @@ import {
   userRoutes, 
   patientRoutes, 
   doctorRoutes, 
-  staffRoutes 
+  staffRoutes, 
+  availabilityRoutes,
+  appointmentRoutes
 } from './routes/index.mjs';
 
 //initialize express app

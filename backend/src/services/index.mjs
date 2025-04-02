@@ -9,6 +9,7 @@ import tokenBlacklistService from './tokenBlacklistService.mjs';
 import authService from './authService.mjs';
 import clinicAuthService from './clinicAuthService.mjs';
 import availabilityService from './availabilityService.mjs';
+import appointmentService from './appointmentService.mjs';
 
 export {
   userService,
@@ -19,5 +20,6 @@ export {
   tokenBlacklistService,
   authService,
   clinicAuthService,
-  availabilityService
+  availabilityService,
+  appointmentService
 };

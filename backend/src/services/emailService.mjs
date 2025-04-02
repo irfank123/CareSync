@@ -9,7 +9,8 @@ import {
   passwordResetTemplate,
   mfaCodeTemplate,
   appointmentConfirmationTemplate,
-  clinicVerificationTemplate
+  clinicVerificationTemplate,
+  appointmentReminderTemplate
 } from '../emailTemplates/index.mjs';
 
 /**
@@ -269,7 +270,34 @@ class EmailService {
       text
     });
   }
-  
+
+  /**
+   * Send appointment reminder email
+   * @param {Object} appointment - Appointment data
+   * @param {Object} patient - Patient data
+   * @param {Object} doctor - Doctor data
+   * @returns {Promise<Object>} Send result
+   */
+  async sendAppointmentReminder(appointment, patient, doctor) {
+    // Generate email content from template
+    const { appointmentReminderTemplate } = await import('../emailTemplates/index.mjs');
+    
+    const { html, text } = appointmentReminderTemplate({
+      appName: config.appName,
+      appointment,
+      patient,
+      doctor,
+      frontendUrl: config.frontendUrl
+    });
+    
+    return this.sendEmail({
+      to: patient.email,
+      subject: `Reminder: Your Appointment with Dr. ${doctor.lastName}`,
+      html,
+      text
+    });
+  }
+    
   //method to handle async initialization
   async initDevTransport() {
     try {

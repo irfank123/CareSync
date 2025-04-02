@@ -6,8 +6,8 @@ import userRoutes from './userRoutes.mjs';
 import patientRoutes from './patientRoutes.mjs';
 import doctorRoutes from './doctorRoutes.mjs';
 import staffRoutes from './staffRoutes.mjs';
-import availabilityRoutes from './routes/availabilityRoutes.mjs';
-
+import availabilityRoutes from './availabilityRoutes.mjs';
+import appointmentRoutes from './appointmentRoutes.mjs';
 
 export {
   authRoutes,
@@ -16,5 +16,6 @@ export {
   patientRoutes,
   doctorRoutes,
   staffRoutes,
-  availabilityRoutes
+  availabilityRoutes,
+  appointmentRoutes
 };
