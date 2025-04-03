@@ -1,18 +1,34 @@
 // src/services/patientService.mjs
 
+import BaseService from './base/baseService.mjs';
 import { Patient, User, AuditLog } from '../models/index.mjs';
 import mongoose from 'mongoose';
+import { AppError } from '../utils/errorHandler.mjs';
 
 /**
- * Patient Management Service
+ * Patient Service extending the BaseService
  */
-class PatientService {
+class PatientService extends BaseService {
+  constructor() {
+    // Configure base service with Patient model and options
+    super(Patient, 'Patient', {
+      // Fields to populate when fetching patients
+      populateFields: [
+        { path: 'userId', select: 'firstName lastName email phoneNumber isActive' }
+      ],
+      // Fields to use for text search
+      searchFields: ['userId.firstName', 'userId.lastName', 'userId.email'],
+      // This service supports clinic associations
+      supportsClinic: true
+    });
+  }
+  
   /**
-   * Get all patients with filtering and pagination
+   * Override getAll to support complex queries with aggregation pipeline
    * @param {Object} options - Query options
    * @returns {Object} Patients and pagination info
    */
-  async getAllPatients(options) {
+  async getAll(options) {
     try {
       const {
         page = 1,
@@ -106,198 +122,63 @@ class PatientService {
       sortStage[sortField] = sortDirection;
       pipeline.push({ $sort: sortStage });
       
-      // Stage 5: Count total documents (for pagination)
-      const countPipeline = [...pipeline];
-      countPipeline.push({ $count: 'total' });
-      
-      // Stage 6: Skip and limit for pagination
-      pipeline.push({ $skip: skip });
-      pipeline.push({ $limit: limit });
-      
-      // Stage 7: Project the fields we want to return
+      // Use facet to get both data and count in a single query
       pipeline.push({
-        $project: {
-          _id: 1,
-          userId: 1,
-          dateOfBirth: 1,
-          gender: 1,
-          address: 1,
-          emergencyContact: 1,
-          allergies: 1,
-          medicalHistory: 1,
-          currentMedications: 1,
-          preferredCommunication: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          'user._id': 1,
-          'user.firstName': 1,
-          'user.lastName': 1,
-          'user.email': 1,
-          'user.phoneNumber': 1,
-          'user.isActive': 1,
-          'user.role': 1,
-          'user.clinicId': 1,
-          'user.emailVerified': 1,
-          'user.lastLogin': 1,
-          'user.profileImageUrl': 1
+        $facet: {
+          // Data with pagination
+          data: [
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                _id: 1,
+                userId: 1,
+                dateOfBirth: 1,
+                gender: 1,
+                address: 1,
+                emergencyContact: 1,
+                allergies: 1,
+                medicalHistory: 1,
+                currentMedications: 1,
+                preferredCommunication: 1,
+                createdAt: 1,
+                updatedAt: 1,
+                'user._id': 1,
+                'user.firstName': 1,
+                'user.lastName': 1,
+                'user.email': 1,
+                'user.phoneNumber': 1,
+                'user.isActive': 1,
+                'user.role': 1,
+                'user.clinicId': 1,
+                'user.emailVerified': 1,
+                'user.lastLogin': 1,
+                'user.profileImageUrl': 1
+              }
+            }
+          ],
+          // Total count for pagination
+          count: [{ $count: 'total' }]
         }
       });
       
       // Execute the aggregation pipeline
-      const patients = await Patient.aggregate(pipeline);
+      const [result] = await Patient.aggregate(pipeline);
       
-      // Get the total count for pagination
-      const countResult = await Patient.aggregate(countPipeline);
-      const total = countResult.length > 0 ? countResult[0].total : 0;
+      const patients = result.data || [];
+      const total = result.count.length > 0 ? result.count[0].total : 0;
       
       return {
-        patients,
+        data: patients,
         total,
         totalPages: Math.ceil(total / limit),
-        currentPage: page
+        currentPage: parseInt(page, 10)
       };
     } catch (error) {
-      console.error('Get all patients error:', error);
-      throw new Error('Failed to retrieve patients');
+      this._handleError(error, 'Failed to retrieve patients');
     }
   }
-
-  /**
-   * Get patient by ID
-   * @param {string} patientId - Patient ID
-   * @returns {Object} Patient with user information
-   */
-  async getPatientById(patientId) {
-    try {
-        //validate ObjectId
-        if (!mongoose.Types.ObjectId.isValid(patientId)) {
-            throw new Error('Invalid ID format');
-        }
-      // Use aggregation to get patient and user data in one query
-      const patient = await Patient.aggregate([
-        {
-          $match: { _id: mongoose.Types.ObjectId(patientId) }
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'userId',
-            foreignField: '_id',
-            as: 'user'
-          }
-        },
-        {
-          $unwind: {
-            path: '$user',
-            preserveNullAndEmptyArrays: true
-          }
-        },
-        {
-          $project: {
-            _id: 1,
-            userId: 1,
-            dateOfBirth: 1,
-            gender: 1,
-            address: 1,
-            emergencyContact: 1,
-            allergies: 1,
-            medicalHistory: 1,
-            currentMedications: 1,
-            preferredCommunication: 1,
-            createdAt: 1,
-            updatedAt: 1,
-            'user._id': 1,
-            'user.firstName': 1,
-            'user.lastName': 1,
-            'user.email': 1,
-            'user.phoneNumber': 1,
-            'user.isActive': 1,
-            'user.role': 1,
-            'user.clinicId': 1,
-            'user.emailVerified': 1,
-            'user.lastLogin': 1,
-            'user.profileImageUrl': 1
-          }
-        }
-      ]);
-      
-      if (!patient || patient.length === 0) {
-        return null;
-      }
-      
-      return patient[0];
-    } catch (error) {
-      console.error('Get patient by ID error:', error);
-      throw new Error('Failed to retrieve patient');
-    }
-  }
-
-  /**
-   * Get patient by user ID
-   * @param {string} userId - User ID
-   * @returns {Object} Patient with user information
-   */
-  async getPatientByUserId(userId) {
-    try {
-      // Use aggregation to get patient and user data in one query
-      const patient = await Patient.aggregate([
-        {
-          $match: { userId: mongoose.Types.ObjectId(userId) }
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'userId',
-            foreignField: '_id',
-            as: 'user'
-          }
-        },
-        {
-          $unwind: {
-            path: '$user',
-            preserveNullAndEmptyArrays: true
-          }
-        },
-        {
-          $project: {
-            _id: 1,
-            userId: 1,
-            dateOfBirth: 1,
-            gender: 1,
-            address: 1,
-            emergencyContact: 1,
-            allergies: 1,
-            medicalHistory: 1,
-            currentMedications: 1,
-            preferredCommunication: 1,
-            createdAt: 1,
-            updatedAt: 1,
-            'user._id': 1,
-            'user.firstName': 1,
-            'user.lastName': 1,
-            'user.email': 1,
-            'user.phoneNumber': 1,
-            'user.isActive': 1,
-            'user.role': 1,
-            'user.clinicId': 1,
-            'user.emailVerified': 1,
-            'user.lastLogin': 1,
-            'user.profileImageUrl': 1
-          }
-        }
-      ]);
-      
-      if (!patient || patient.length === 0) {
-        return null;
-      }
-      
-      return patient[0];
-    } catch (error) {
-      console.error('Get patient by user ID error:', error);
-      throw new Error('Failed to retrieve patient');
-    }
-  }
-
+  
   /**
    * Get patient's user ID
    * @param {string} patientId - Patient ID
@@ -305,33 +186,35 @@ class PatientService {
    */
   async getPatientUserId(patientId) {
     try {
+      this._validateId(patientId);
+      
       const patient = await Patient.findById(patientId).select('userId');
       return patient ? patient.userId : null;
     } catch (error) {
-      console.error('Get patient user ID error:', error);
-      throw new Error('Failed to retrieve patient user ID');
+      this._handleError(error, 'Failed to retrieve patient user ID');
     }
   }
-
+  
   /**
-   * Create new patient
+   * Override create to handle user role update
    * @param {Object} patientData - Patient data
-   * @returns {Object} New patient
+   * @param {string} createdBy - User ID creating the patient
+   * @returns {Object} Created patient
    */
-  async createPatient(patientData) {
-    const session = await mongoose.startSession();
+  async create(patientData, createdBy) {
+    const session = await this.startSession();
     session.startTransaction();
     
     try {
       // Verify that the user exists and is not already a patient
       const user = await User.findById(patientData.userId);
       if (!user) {
-        throw new Error('User not found');
+        throw new AppError('User not found', 404);
       }
       
       const existingPatient = await Patient.findOne({ userId: patientData.userId });
       if (existingPatient) {
-        throw new Error('User is already a patient');
+        throw new AppError('User is already a patient', 400);
       }
       
       // Update user role if needed
@@ -355,7 +238,7 @@ class PatientService {
       
       // Create audit log
       await AuditLog.create([{
-        userId: patientData.userId,
+        userId: createdBy,
         action: 'create',
         resource: 'patient',
         resourceId: patient[0]._id,
@@ -369,121 +252,50 @@ class PatientService {
       await session.commitTransaction();
       
       // Return the complete patient with user info
-      return this.getPatientById(patient[0]._id);
+      return this.getById(patient[0]._id);
     } catch (error) {
       // Abort transaction on error
       await session.abortTransaction();
-      console.error('Create patient error:', error);
-      throw new Error(error.message || 'Failed to create patient');
+      this._handleError(error, 'Failed to create patient');
     } finally {
       session.endSession();
     }
   }
-
+  
   /**
-   * Update patient
+   * Get patient's medical history
    * @param {string} patientId - Patient ID
-   * @param {Object} updateData - Data to update
-   * @returns {Object} Updated patient
+   * @returns {Array} Medical history
    */
-  async updatePatient(patientId, updateData) {
+  async getMedicalHistory(patientId) {
     try {
-    // Validate ObjectId
-    if (!mongoose.Types.ObjectId.isValid(patientId)) {
-        throw new Error('Invalid ID format');
-    }
-
-      // Check if patient exists
-      const patient = await Patient.findById(patientId);
+      this._validateId(patientId);
+      
+      const patient = await Patient.findById(patientId).select('medicalHistory');
       if (!patient) {
         return null;
       }
       
-      // Update patient
-      const updatedPatient = await Patient.findByIdAndUpdate(
-        patientId,
-        { $set: updateData },
-        { new: true, runValidators: true }
-      );
-      
-      if (!updatedPatient) {
-        return null;
-      }
-      
-      // Create audit log
-      await AuditLog.create({
-        userId: patient.userId,
-        action: 'update',
-        resource: 'patient',
-        resourceId: patientId,
-        details: {
-          updatedFields: Object.keys(updateData)
-        }
-      });
-      
-      // Return complete patient with user info
-      return this.getPatientById(patientId);
+      return patient.medicalHistory || [];
     } catch (error) {
-      console.error('Update patient error:', error);
-      throw new Error('Failed to update patient');
+      this._handleError(error, 'Failed to retrieve medical history');
     }
   }
-
+  
   /**
-   * Update patient by user ID
-   * @param {string} userId - User ID
-   * @param {Object} updateData - Data to update
-   * @returns {Object} Updated patient
-   */
-  async updatePatientByUserId(userId, updateData) {
-    try {
-      // Find patient by user ID
-      const patient = await Patient.findOne({ userId });
-      if (!patient) {
-        return null;
-      }
-      
-      // Update patient
-      const updatedPatient = await Patient.findByIdAndUpdate(
-        patient._id,
-        { $set: updateData },
-        { new: true, runValidators: true }
-      );
-      
-      if (!updatedPatient) {
-        return null;
-      }
-      
-      // Create audit log
-      await AuditLog.create({
-        userId: userId,
-        action: 'update',
-        resource: 'patient',
-        resourceId: patient._id,
-        details: {
-          updatedFields: Object.keys(updateData)
-        }
-      });
-      
-      // Return complete patient with user info
-      return this.getPatientByUserId(userId);
-    } catch (error) {
-      console.error('Update patient by user ID error:', error);
-      throw new Error('Failed to update patient');
-    }
-  }
-
-  /**
-   * Delete patient
+   * Override delete to handle transaction and audit logging
    * @param {string} patientId - Patient ID to delete
+   * @param {string} deletedBy - User ID deleting the patient
    * @returns {boolean} Success status
    */
-  async deletePatient(patientId) {
-    const session = await mongoose.startSession();
+  async delete(patientId, deletedBy) {
+    const session = await this.startSession();
     session.startTransaction();
     
     try {
-      // Find the patient first
+      this._validateId(patientId);
+      
+      // Find the patient first to get user ID
       const patient = await Patient.findById(patientId);
       if (!patient) {
         return false;
@@ -494,7 +306,7 @@ class PatientService {
       
       // Create audit log
       await AuditLog.create([{
-        userId: patient.userId,
+        userId: deletedBy,
         action: 'delete',
         resource: 'patient',
         resourceId: patientId
@@ -507,31 +319,14 @@ class PatientService {
     } catch (error) {
       // Abort transaction on error
       await session.abortTransaction();
-      console.error('Delete patient error:', error);
-      throw new Error('Failed to delete patient');
+      this._handleError(error, 'Failed to delete patient');
     } finally {
       session.endSession();
     }
   }
-
-  /**
-   * Get patient's medical history
-   * @param {string} patientId - Patient ID
-   * @returns {Array} Medical history
-   */
-  async getMedicalHistory(patientId) {
-    try {
-      const patient = await Patient.findById(patientId).select('medicalHistory');
-      if (!patient) {
-        return null;
-      }
-      
-      return patient.medicalHistory || [];
-    } catch (error) {
-      console.error('Get medical history error:', error);
-      throw new Error('Failed to retrieve medical history');
-    }
-  }
 }
 
-export default new PatientService();
+// Create single instance of PatientService
+const patientService = new PatientService();
+
+export default patientService;

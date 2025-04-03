@@ -1,18 +1,34 @@
 // src/services/doctorService.mjs
 
+import BaseService from './base/baseService.mjs';
 import { Doctor, User, TimeSlot, AuditLog } from '../models/index.mjs';
 import mongoose from 'mongoose';
+import { AppError } from '../utils/errorHandler.mjs';
 
 /**
- * Doctor Management Service
+ * Doctor Service extending the BaseService
  */
-class DoctorService {
+class DoctorService extends BaseService {
+  constructor() {
+    // Configure base service with Doctor model and options
+    super(Doctor, 'Doctor', {
+      // Fields to populate when fetching doctors
+      populateFields: [
+        { path: 'userId', select: 'firstName lastName email phoneNumber isActive' }
+      ],
+      // Fields to use for text search
+      searchFields: ['userId.firstName', 'userId.lastName', 'userId.email', 'specialties'],
+      // This service supports clinic associations
+      supportsClinic: true
+    });
+  }
+  
   /**
-   * Get all doctors with filtering and pagination
+   * Override getAll to support complex queries with aggregation pipeline
    * @param {Object} options - Query options
    * @returns {Object} Doctors and pagination info
    */
-  async getAllDoctors(options) {
+  async getAll(options) {
     try {
       const {
         page = 1,
@@ -105,205 +121,65 @@ class DoctorService {
       sortStage[sortField] = sortDirection;
       pipeline.push({ $sort: sortStage });
       
-      // Stage 5: Count total documents (for pagination)
-      const countPipeline = [...pipeline];
-      countPipeline.push({ $count: 'total' });
-      
-      // Stage 6: Skip and limit for pagination
-      pipeline.push({ $skip: skip });
-      pipeline.push({ $limit: limit });
-      
-      // Stage 7: Project the fields we want to return
+      // Use facet to get both data and count in a single query
       pipeline.push({
-        $project: {
-          _id: 1,
-          userId: 1,
-          specialties: 1,
-          licenseNumber: 1,
-          deaNumber: 1,
-          education: 1,
-          availabilitySchedule: 1,
-          vacationDays: 1,
-          maxAppointmentsPerDay: 1,
-          appointmentDuration: 1,
-          acceptingNewPatients: 1,
-          appointmentFee: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          'user._id': 1,
-          'user.firstName': 1,
-          'user.lastName': 1,
-          'user.email': 1,
-          'user.phoneNumber': 1,
-          'user.isActive': 1,
-          'user.role': 1,
-          'user.clinicId': 1,
-          'user.emailVerified': 1,
-          'user.lastLogin': 1,
-          'user.profileImageUrl': 1
+        $facet: {
+          // Data with pagination
+          data: [
+            { $skip: skip },
+            { $limit: limit },
+            {
+              $project: {
+                _id: 1,
+                userId: 1,
+                specialties: 1,
+                licenseNumber: 1,
+                deaNumber: 1,
+                education: 1,
+                availabilitySchedule: 1,
+                vacationDays: 1,
+                maxAppointmentsPerDay: 1,
+                appointmentDuration: 1,
+                acceptingNewPatients: 1,
+                appointmentFee: 1,
+                createdAt: 1,
+                updatedAt: 1,
+                'user._id': 1,
+                'user.firstName': 1,
+                'user.lastName': 1,
+                'user.email': 1,
+                'user.phoneNumber': 1,
+                'user.isActive': 1,
+                'user.role': 1,
+                'user.clinicId': 1,
+                'user.emailVerified': 1,
+                'user.lastLogin': 1,
+                'user.profileImageUrl': 1
+              }
+            }
+          ],
+          // Total count for pagination
+          count: [{ $count: 'total' }]
         }
       });
       
       // Execute the aggregation pipeline
-      const doctors = await Doctor.aggregate(pipeline);
+      const [result] = await Doctor.aggregate(pipeline);
       
-      // Get the total count for pagination
-      const countResult = await Doctor.aggregate(countPipeline);
-      const total = countResult.length > 0 ? countResult[0].total : 0;
+      const doctors = result.data || [];
+      const total = result.count.length > 0 ? result.count[0].total : 0;
       
       return {
-        doctors,
+        data: doctors,
         total,
         totalPages: Math.ceil(total / limit),
-        currentPage: page
+        currentPage: parseInt(page, 10)
       };
     } catch (error) {
-      console.error('Get all doctors error:', error);
-      throw new Error('Failed to retrieve doctors');
+      this._handleError(error, 'Failed to retrieve doctors');
     }
   }
-
-  /**
- * Get doctor by ID
- * @param {string} doctorId - Doctor ID
- * @returns {Object} Doctor with user information
- */
-async getDoctorById(doctorId) {
-    try {
-      // Validate ObjectId
-      if (!mongoose.Types.ObjectId.isValid(doctorId)) {
-        throw new Error('Invalid doctor ID format');
-      }
-      
-      // Use aggregation to get doctor and user data in one query
-      const doctor = await Doctor.aggregate([
-        {
-          $match: { _id: mongoose.Types.ObjectId(doctorId) }
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'userId',
-            foreignField: '_id',
-            as: 'user'
-          }
-        },
-        {
-          $unwind: {
-            path: '$user',
-            preserveNullAndEmptyArrays: true
-          }
-        },
-        {
-          $project: {
-            _id: 1,
-            userId: 1,
-            specialties: 1,
-            licenseNumber: 1,
-            deaNumber: 1,
-            education: 1,
-            availabilitySchedule: 1,
-            vacationDays: 1,
-            maxAppointmentsPerDay: 1,
-            appointmentDuration: 1,
-            acceptingNewPatients: 1,
-            appointmentFee: 1,
-            createdAt: 1,
-            updatedAt: 1,
-            'user._id': 1,
-            'user.firstName': 1,
-            'user.lastName': 1,
-            'user.email': 1,
-            'user.phoneNumber': 1,
-            'user.isActive': 1,
-            'user.role': 1,
-            'user.clinicId': 1,
-            'user.emailVerified': 1,
-            'user.lastLogin': 1,
-            'user.profileImageUrl': 1
-          }
-        }
-      ]);
-      
-      if (!doctor || doctor.length === 0) {
-        return null;
-      }
-      
-      return doctor[0];
-    } catch (error) {
-      console.error('Get doctor by ID error:', error);
-      throw new Error(`Failed to retrieve doctor: ${error.message}`);
-    }
-  }
-
-  /**
-   * Get doctor by user ID
-   * @param {string} userId - User ID
-   * @returns {Object} Doctor with user information
-   */
-  async getDoctorByUserId(userId) {
-    try {
-      // Use aggregation to get doctor and user data in one query
-      const doctor = await Doctor.aggregate([
-        {
-          $match: { userId: mongoose.Types.ObjectId(userId) }
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'userId',
-            foreignField: '_id',
-            as: 'user'
-          }
-        },
-        {
-          $unwind: {
-            path: '$user',
-            preserveNullAndEmptyArrays: true
-          }
-        },
-        {
-          $project: {
-            _id: 1,
-            userId: 1,
-            specialties: 1,
-            licenseNumber: 1,
-            deaNumber: 1,
-            education: 1,
-            availabilitySchedule: 1,
-            vacationDays: 1,
-            maxAppointmentsPerDay: 1,
-            appointmentDuration: 1,
-            acceptingNewPatients: 1,
-            appointmentFee: 1,
-            createdAt: 1,
-            updatedAt: 1,
-            'user._id': 1,
-            'user.firstName': 1,
-            'user.lastName': 1,
-            'user.email': 1,
-            'user.phoneNumber': 1,
-            'user.isActive': 1,
-            'user.role': 1,
-            'user.clinicId': 1,
-            'user.emailVerified': 1,
-            'user.lastLogin': 1,
-            'user.profileImageUrl': 1
-          }
-        }
-      ]);
-      
-      if (!doctor || doctor.length === 0) {
-        return null;
-      }
-      
-      return doctor[0];
-    } catch (error) {
-      console.error('Get doctor by user ID error:', error);
-      throw new Error('Failed to retrieve doctor');
-    }
-  }
-
+  
   /**
    * Get doctor's user ID
    * @param {string} doctorId - Doctor ID
@@ -311,33 +187,35 @@ async getDoctorById(doctorId) {
    */
   async getDoctorUserId(doctorId) {
     try {
+      this._validateId(doctorId);
+      
       const doctor = await Doctor.findById(doctorId).select('userId');
       return doctor ? doctor.userId : null;
     } catch (error) {
-      console.error('Get doctor user ID error:', error);
-      throw new Error('Failed to retrieve doctor user ID');
+      this._handleError(error, 'Failed to retrieve doctor user ID');
     }
   }
-
+  
   /**
-   * Create new doctor
+   * Override create to handle user role update
    * @param {Object} doctorData - Doctor data
-   * @returns {Object} New doctor
+   * @param {string} createdBy - User ID creating the doctor
+   * @returns {Object} Created doctor
    */
-  async createDoctor(doctorData) {
-    const session = await mongoose.startSession();
+  async create(doctorData, createdBy) {
+    const session = await this.startSession();
     session.startTransaction();
     
     try {
       // Verify that the user exists and is not already a doctor
       const user = await User.findById(doctorData.userId);
       if (!user) {
-        throw new Error('User not found');
+        throw new AppError('User not found', 404);
       }
       
       const existingDoctor = await Doctor.findOne({ userId: doctorData.userId });
       if (existingDoctor) {
-        throw new Error('User is already a doctor');
+        throw new AppError('User is already a doctor', 400);
       }
       
       // Update user role if needed
@@ -363,7 +241,7 @@ async getDoctorById(doctorId) {
       
       // Create audit log
       await AuditLog.create([{
-        userId: doctorData.userId,
+        userId: createdBy,
         action: 'create',
         resource: 'doctor',
         resourceId: doctor[0]._id,
@@ -377,121 +255,30 @@ async getDoctorById(doctorId) {
       await session.commitTransaction();
       
       // Return the complete doctor with user info
-      return this.getDoctorById(doctor[0]._id);
+      return this.getById(doctor[0]._id);
     } catch (error) {
       // Abort transaction on error
       await session.abortTransaction();
-      console.error('Create doctor error:', error);
-      throw new Error(error.message || 'Failed to create doctor');
+      this._handleError(error, 'Failed to create doctor');
     } finally {
       session.endSession();
     }
   }
-
-  /**
-   * Update doctor
-   * @param {string} doctorId - Doctor ID
-   * @param {Object} updateData - Data to update
-   * @returns {Object} Updated doctor
-   */
-  async updateDoctor(doctorId, updateData) {
-    try {
-      // Check if doctor exists
-      if (!mongoose.Types.ObjectId.isValid(doctorId)) {
-        throw new Error('Invalid doctor ID format');
-      }
-      
-      const doctor = await Doctor.findById(doctorId);
-      if (!doctor) {
-        throw new Error('Doctor not found');
-      }
-      
-      // Update doctor
-      const updatedDoctor = await Doctor.findByIdAndUpdate(
-        doctorId,
-        { $set: updateData },
-        { new: true, runValidators: true }
-      );
-      
-      if (!updatedDoctor) {
-        throw new Error('Doctor update failed');
-      }
-      
-      // Create audit log
-      await AuditLog.create({
-        userId: doctor.userId,
-        action: 'update',
-        resource: 'doctor',
-        resourceId: doctorId,
-        details: {
-          updatedFields: Object.keys(updateData)
-        }
-      });
-      
-      // Return complete doctor with user info
-      return this.getDoctorById(doctorId);
-    } catch (error) {
-      console.error('Update doctor error:', error);
-      throw new Error(`Failed to update doctor: ${error.message}`);
-    }
-  }
   
-
   /**
-   * Update doctor by user ID
-   * @param {string} userId - User ID
-   * @param {Object} updateData - Data to update
-   * @returns {Object} Updated doctor
-   */
-  async updateDoctorByUserId(userId, updateData) {
-    try {
-      // Find doctor by user ID
-      const doctor = await Doctor.findOne({ userId });
-      if (!doctor) {
-        return null;
-      }
-      
-      // Update doctor
-      const updatedDoctor = await Doctor.findByIdAndUpdate(
-        doctor._id,
-        { $set: updateData },
-        { new: true, runValidators: true }
-      );
-      
-      if (!updatedDoctor) {
-        return null;
-      }
-      
-      // Create audit log
-      await AuditLog.create({
-        userId: userId,
-        action: 'update',
-        resource: 'doctor',
-        resourceId: doctor._id,
-        details: {
-          updatedFields: Object.keys(updateData)
-        }
-      });
-      
-      // Return complete doctor with user info
-      return this.getDoctorByUserId(userId);
-    } catch (error) {
-      console.error('Update doctor by user ID error:', error);
-      throw new Error('Failed to update doctor');
-    }
-  }
-
-  /**
-   * Delete doctor
+   * Override delete to handle time slots and appointments
    * @param {string} doctorId - Doctor ID to delete
+   * @param {string} deletedBy - User ID deleting the doctor
    * @returns {boolean} Success status
    */
-  async deleteDoctor(doctorId) {
-    const session = await mongoose.startSession();
+  async delete(doctorId, deletedBy) {
+    const session = await this.startSession();
     session.startTransaction();
     
     try {
-      // Find the doctor first
+      this._validateId(doctorId);
+      
+      // Find the doctor first to get user ID
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         return false;
@@ -505,7 +292,7 @@ async getDoctorById(doctorId) {
       
       // Create audit log
       await AuditLog.create([{
-        userId: doctor.userId,
+        userId: deletedBy,
         action: 'delete',
         resource: 'doctor',
         resourceId: doctorId
@@ -518,13 +305,12 @@ async getDoctorById(doctorId) {
     } catch (error) {
       // Abort transaction on error
       await session.abortTransaction();
-      console.error('Delete doctor error:', error);
-      throw new Error('Failed to delete doctor');
+      this._handleError(error, 'Failed to delete doctor');
     } finally {
       session.endSession();
     }
   }
-
+  
   /**
    * Get doctor's availability
    * @param {string} doctorId - Doctor ID
@@ -534,6 +320,8 @@ async getDoctorById(doctorId) {
    */
   async getDoctorAvailability(doctorId, startDate, endDate) {
     try {
+      this._validateId(doctorId);
+      
       // Default to retrieving the next 7 days if dates aren't provided
       const today = new Date();
       const start = startDate || today;
@@ -542,7 +330,7 @@ async getDoctorById(doctorId) {
       // Get the doctor to access their schedule
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
-        throw new Error('Doctor not found');
+        throw new AppError('Doctor not found', 404);
       }
       
       // Get all time slots for this doctor in the date range
@@ -552,75 +340,14 @@ async getDoctorById(doctorId) {
         status: 'available'
       }).sort({ date: 1, startTime: 1 });
       
-      // If there are no pre-generated time slots, generate them based on doctor's schedule
-      if (timeSlots.length === 0) {
-        // Generate temporary slots based on the doctor's availability schedule
-        const generatedSlots = [];
-        
-        // Iterate through each day in the date range
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-          const currentDate = new Date(d);
-          const dayOfWeek = currentDate.getDay(); // 0-6 (Sunday-Saturday)
-          
-          // Find the schedule for this day of week
-          const daySchedule = doctor.availabilitySchedule.find(
-            schedule => schedule.dayOfWeek === dayOfWeek && schedule.isAvailable
-          );
-          
-          // Skip if no schedule for this day or not available
-          if (!daySchedule) continue;
-          
-          // Check if this is a vacation day
-          const isVacationDay = doctor.vacationDays.some(
-            vacation => 
-              vacation.date.getFullYear() === currentDate.getFullYear() &&
-              vacation.date.getMonth() === currentDate.getMonth() &&
-              vacation.date.getDate() === currentDate.getDate() &&
-              !vacation.isWorkDay
-          );
-          
-          // Skip if vacation day
-          if (isVacationDay) continue;
-          
-          // Parse start and end times
-          const [startHour, startMinute] = daySchedule.startTime.split(':').map(Number);
-          const [endHour, endMinute] = daySchedule.endTime.split(':').map(Number);
-          
-          // Use doctor's appointment duration or default
-          const appointmentDuration = doctor.appointmentDuration || 30; // in minutes
-          const slotStart = new Date(currentDate);
-          slotStart.setHours(startHour, startMinute, 0, 0);
-          
-          const slotEnd = new Date(currentDate);
-          slotEnd.setHours(endHour, endMinute, 0, 0);
-          
-          // Generate slots while slot end time is before the end of day
-          while (slotStart.getTime() + appointmentDuration * 60000 <= slotEnd.getTime()) {
-            const slotEndTime = new Date(slotStart.getTime() + appointmentDuration * 60000);
-            
-            generatedSlots.push({
-              doctorId,
-              date: new Date(slotStart),
-              startTime: slotStart.toTimeString().substring(0, 5),
-              endTime: slotEndTime.toTimeString().substring(0, 5),
-              status: 'available',
-              generated: true // Flag to indicate this is a generated slot, not from database
-            });
-            
-            // Move to next slot
-            slotStart.setTime(slotStart.getTime() + appointmentDuration * 60000);
-          }
-        }
-        
-        return generatedSlots;
-      }
-      
       return timeSlots;
     } catch (error) {
-      console.error('Get doctor availability error:', error);
-      throw new Error('Failed to retrieve doctor availability');
+      this._handleError(error, 'Failed to retrieve doctor availability');
     }
   }
 }
 
-export default new DoctorService();
+// Create single instance of DoctorService
+const doctorService = new DoctorService();
+
+export default doctorService;

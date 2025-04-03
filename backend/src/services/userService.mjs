@@ -1,18 +1,32 @@
 // src/services/userService.mjs
 
+import BaseService from './base/baseService.mjs';
 import { User, Patient, Doctor, Staff, AuditLog } from '../models/index.mjs';
 import mongoose from 'mongoose';
+import { AppError } from '../utils/errorHandler.mjs';
 
 /**
- * User Management Service
+ * User Service extending the BaseService
  */
-class UserService {
+class UserService extends BaseService {
+  constructor() {
+    // Configure base service with User model and options
+    super(User, 'User', {
+      // Fields to populate when fetching users
+      populateFields: [],
+      // Fields to use for text search
+      searchFields: ['firstName', 'lastName', 'email', 'phoneNumber'],
+      // This service supports clinic associations
+      supportsClinic: true
+    });
+  }
+  
   /**
-   * Get all users with filtering and pagination
+   * Override getAll to support more complex filtering
    * @param {Object} options - Query options
    * @returns {Object} Users and pagination info
    */
-  async getAllUsers(options) {
+  async getAll(options) {
     try {
       const {
         page = 1,
@@ -53,42 +67,66 @@ class UserService {
       const sortOptions = {};
       sortOptions[sort] = sortDirection;
       
-      // Execute query with pagination
-      const users = await User.find(query)
-        .select('-passwordHash -resetPasswordToken -resetPasswordExpire -emailVerificationToken -emailVerificationExpire')
-        .sort(sortOptions)
-        .skip(skip)
-        .limit(limit);
+      // Use facet to get both data and count in a single query
+      const result = await User.aggregate([
+        { $match: query },
+        {
+          $facet: {
+            // Data with pagination
+            data: [
+              { $sort: sortOptions },
+              { $skip: skip },
+              { $limit: limit },
+              {
+                $project: {
+                  _id: 1,
+                  firstName: 1,
+                  lastName: 1,
+                  email: 1,
+                  role: 1,
+                  phoneNumber: 1,
+                  isActive: 1,
+                  emailVerified: 1,
+                  profileImageUrl: 1,
+                  createdAt: 1,
+                  lastLogin: 1,
+                  clinicId: 1,
+                  preferences: 1
+                }
+              }
+            ],
+            // Total count for pagination
+            count: [{ $count: 'total' }]
+          }
+        }
+      ]);
       
-      // Get total count for pagination
-      const total = await User.countDocuments(query);
+      const users = result[0].data || [];
+      const total = result[0].count.length > 0 ? result[0].count[0].total : 0;
       
       return {
-        users,
+        data: users,
         total,
         totalPages: Math.ceil(total / limit),
-        currentPage: page
+        currentPage: parseInt(page, 10)
       };
     } catch (error) {
-      console.error('Get all users error:', error);
-      throw new Error('Failed to retrieve users');
+      this._handleError(error, 'Failed to retrieve users');
     }
   }
-
+  
   /**
-   * Get user by ID
-   * @param {string} userId - User ID
-   * @returns {Object} User object
+   * Override getById to exclude sensitive fields
+   * @param {string} id - User ID
+   * @returns {Object} User
    */
-  async getUserById(userId) {
+  async getById(id) {
     try {
-      // Validate ObjectId
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-        throw new Error('Invalid ID format');
-    }  
-    
-      const user = await User.findById(userId)
-        .select('-passwordHash -resetPasswordToken -resetPasswordExpire -emailVerificationToken -emailVerificationExpire');
+      this._validateId(id);
+      
+      const user = await User.findById(id)
+        .select('-passwordHash -resetPasswordToken -resetPasswordExpire -emailVerificationToken -emailVerificationExpire')
+        .lean();
       
       if (!user) {
         return null;
@@ -97,39 +135,38 @@ class UserService {
       // Get role-specific data
       let roleData = {};
       if (user.role === 'patient') {
-        roleData = await Patient.findOne({ userId: user._id });
+        roleData = await Patient.findOne({ userId: user._id }).lean();
       } else if (user.role === 'doctor') {
-        roleData = await Doctor.findOne({ userId: user._id });
+        roleData = await Doctor.findOne({ userId: user._id }).lean();
       } else if (user.role === 'staff') {
-        roleData = await Staff.findOne({ userId: user._id });
+        roleData = await Staff.findOne({ userId: user._id }).lean();
       }
       
       // Combine user and role data
       return {
-        ...user.toObject(),
-        roleData: roleData ? roleData.toObject() : null
+        ...user,
+        roleData: roleData || null
       };
     } catch (error) {
-      console.error('Get user by ID error:', error);
-      throw new Error('Failed to retrieve user');
+      this._handleError(error, 'Failed to retrieve user');
     }
   }
-
+  
   /**
-   * Create new user
+   * Override create to handle role-specific records
    * @param {Object} userData - User data
-   * @param {string} createdById - ID of user creating this user
-   * @returns {Object} New user object
+   * @param {string} createdBy - User ID creating the user
+   * @returns {Object} Created user
    */
-  async createUser(userData, createdById) {
-    const session = await mongoose.startSession();
+  async create(userData, createdBy) {
+    const session = await this.startSession();
     session.startTransaction();
     
     try {
       // Check if email already exists
       const existingUser = await User.findOne({ email: userData.email });
       if (existingUser) {
-        throw new Error('User with this email already exists');
+        throw new AppError('User with this email already exists', 400);
       }
       
       // Create the user
@@ -183,7 +220,7 @@ class UserService {
       
       // Create audit log
       await AuditLog.create([{
-        userId: createdById,
+        userId: createdBy,
         action: 'create',
         resource: 'user',
         resourceId: newUser._id,
@@ -196,30 +233,29 @@ class UserService {
       // Commit the transaction
       await session.commitTransaction();
       
-      // Get the complete user with role data
-      const completeUser = await this.getUserById(newUser._id);
-      
-      return completeUser;
+      // Return created user without sensitive fields
+      return this.getById(newUser._id);
     } catch (error) {
       // Abort transaction on error
       await session.abortTransaction();
-      console.error('Create user error:', error);
-      throw new Error(error.message || 'Failed to create user');
+      this._handleError(error, 'Failed to create user');
     } finally {
       session.endSession();
     }
   }
-
+  
   /**
-   * Update user
-   * @param {string} userId - User ID
+   * Override update to handle special fields
+   * @param {string} id - User ID
    * @param {Object} updateData - Data to update
    * @returns {Object} Updated user
    */
-  async updateUser(userId, updateData) {
+  async update(id, updateData) {
     try {
-      // Check if user exists
-      const user = await User.findById(userId);
+      this._validateId(id);
+      
+      // Find the user first
+      const user = await User.findById(id);
       if (!user) {
         return null;
       }
@@ -240,7 +276,7 @@ class UserService {
       
       // Update the user
       const updatedUser = await User.findByIdAndUpdate(
-        userId,
+        id,
         { $set: updateObj },
         { new: true, runValidators: true }
       ).select('-passwordHash -resetPasswordToken -resetPasswordExpire -emailVerificationToken -emailVerificationExpire');
@@ -249,37 +285,28 @@ class UserService {
         return null;
       }
       
-      // Create audit log
-      await AuditLog.create({
-        userId: userId, // Using the user's own ID as actor for now
-        action: 'update',
-        resource: 'user',
-        resourceId: userId,
-        details: {
-          updatedFields: Object.keys(updateObj)
-        }
-      });
-      
-      // Get the complete updated user with role data
-      return await this.getUserById(userId);
+      // Get updated user with role data
+      return this.getById(id);
     } catch (error) {
-      console.error('Update user error:', error);
-      throw new Error('Failed to update user');
+      this._handleError(error, 'Failed to update user');
     }
   }
-
+  
   /**
-   * Delete user
-   * @param {string} userId - User ID to delete
+   * Override delete to handle role-specific records and transactions
+   * @param {string} id - User ID
+   * @param {string} deletedBy - User ID of the person deleting
    * @returns {boolean} Success status
    */
-  async deleteUser(userId) {
-    const session = await mongoose.startSession();
+  async delete(id, deletedBy) {
+    const session = await this.startSession();
     session.startTransaction();
     
     try {
-      // Find the user first
-      const user = await User.findById(userId);
+      this._validateId(id);
+      
+      // Find the user first to get role
+      const user = await User.findById(id);
       if (!user) {
         return false;
       }
@@ -294,14 +321,14 @@ class UserService {
       }
       
       // Delete the user
-      await User.findByIdAndDelete(userId, { session });
+      await User.findByIdAndDelete(id, { session });
       
       // Create audit log
       await AuditLog.create([{
-        userId: userId, // Using the user's own ID as actor for this log
+        userId: deletedBy,
         action: 'delete',
         resource: 'user',
-        resourceId: userId,
+        resourceId: id,
         details: {
           email: user.email,
           role: user.role
@@ -315,13 +342,12 @@ class UserService {
     } catch (error) {
       // Abort transaction on error
       await session.abortTransaction();
-      console.error('Delete user error:', error);
-      throw new Error('Failed to delete user');
+      this._handleError(error, 'Failed to delete user');
     } finally {
       session.endSession();
     }
   }
-
+  
   /**
    * Search users by criteria
    * @param {Object} criteria - Search criteria
@@ -346,15 +372,15 @@ class UserService {
       // Execute search
       const users = await User.find(searchQuery)
         .select('-passwordHash -resetPasswordToken -resetPasswordExpire -emailVerificationToken -emailVerificationExpire')
-        .limit(limit);
+        .limit(limit)
+        .lean();
       
       return users;
     } catch (error) {
-      console.error('Search users error:', error);
-      throw new Error('Failed to search users');
+      this._handleError(error, 'Failed to search users');
     }
   }
-
+  
   /**
    * Get user profile with basic and role-specific information
    * @param {string} userId - User ID
@@ -363,7 +389,7 @@ class UserService {
   async getUserProfile(userId) {
     try {
       // Get user and role-specific data
-      const user = await this.getUserById(userId);
+      const user = await this.getById(userId);
       
       if (!user) {
         return null;
@@ -386,11 +412,10 @@ class UserService {
         profileInfo
       };
     } catch (error) {
-      console.error('Get user profile error:', error);
-      throw new Error('Failed to retrieve user profile');
+      this._handleError(error, 'Failed to retrieve user profile');
     }
   }
-
+  
   /**
    * Get count of patient's appointments
    * @param {string} userId - User ID
@@ -398,15 +423,19 @@ class UserService {
    */
   async getPatientAppointmentsCount(userId) {
     try {
-      // This would typically query the Appointment collection
-      // For now, return a placeholder
-      return 0;
+      // Get patient record
+      const patient = await Patient.findOne({ userId });
+      if (!patient) return 0;
+      
+      // Get appointment count from Appointment model (using mongoose model to avoid circular dependency)
+      const Appointment = mongoose.model('Appointment');
+      return await Appointment.countDocuments({ patientId: patient._id });
     } catch (error) {
       console.error('Get patient appointments count error:', error);
       return 0;
     }
   }
-
+  
   /**
    * Get count of doctor's patients
    * @param {string} userId - User ID
@@ -414,15 +443,20 @@ class UserService {
    */
   async getDoctorPatientsCount(userId) {
     try {
-      // This would typically query the Appointment collection for unique patients
-      // For now, return a placeholder
-      return 0;
+      // Get doctor record
+      const doctor = await Doctor.findOne({ userId });
+      if (!doctor) return 0;
+      
+      // Get distinct patients from Appointment model
+      const Appointment = mongoose.model('Appointment');
+      const distinctPatients = await Appointment.distinct('patientId', { doctorId: doctor._id });
+      return distinctPatients.length;
     } catch (error) {
       console.error('Get doctor patients count error:', error);
       return 0;
     }
   }
-
+  
   /**
    * Get count of doctor's appointments
    * @param {string} userId - User ID
@@ -430,9 +464,13 @@ class UserService {
    */
   async getDoctorAppointmentsCount(userId) {
     try {
-      // This would typically query the Appointment collection
-      // For now, return a placeholder
-      return 0;
+      // Get doctor record
+      const doctor = await Doctor.findOne({ userId });
+      if (!doctor) return 0;
+      
+      // Get appointment count
+      const Appointment = mongoose.model('Appointment');
+      return await Appointment.countDocuments({ doctorId: doctor._id });
     } catch (error) {
       console.error('Get doctor appointments count error:', error);
       return 0;
@@ -440,4 +478,7 @@ class UserService {
   }
 }
 
-export default new UserService();
+// Create a single instance of UserService
+const userService = new UserService();
+
+export default userService;

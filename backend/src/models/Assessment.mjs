@@ -60,6 +60,5 @@ const AssessmentSchema = new mongoose.Schema(
   }
 );
 
-
-const Appointment = mongoose.model('Assessment', AssessmentSchema);
-export default Appointment;
+const Assessment = mongoose.model('Assessment', AssessmentSchema);
+export default Assessment;

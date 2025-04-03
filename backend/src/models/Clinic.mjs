@@ -92,4 +92,5 @@ clinicSchema.methods.comparePassword = async function(candidatePassword) {
   }
 };
 
-export default mongoose.model('Clinic', clinicSchema);
+const Clinic = mongoose.model('Clinic', clinicSchema);
+export default Clinic;

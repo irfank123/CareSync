@@ -1,9 +1,18 @@
 // src/services/appointmentService.mjs
 
-import { Appointment, TimeSlot, User, Patient, Doctor, Assessment, AuditLog, Notification } from '../models/index.mjs';
 import emailService from './emailService.mjs';
 import mongoose from 'mongoose';
 import config from '../config/config.mjs';
+
+// Import models directly from mongoose
+const Appointment = mongoose.model('Appointment');
+const TimeSlot = mongoose.model('TimeSlot');
+const User = mongoose.model('User');
+const Patient = mongoose.model('Patient');
+const Doctor = mongoose.model('Doctor');
+const Assessment = mongoose.model('Assessment');
+const AuditLog = mongoose.model('AuditLog');
+const Notification = mongoose.model('Notification');
 
 /**
  * Appointment Management Service
