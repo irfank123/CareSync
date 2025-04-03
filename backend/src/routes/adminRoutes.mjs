@@ -10,7 +10,7 @@ import {
   suspendClinic,
   updateVerificationValidation
 } from '../controllers/adminController.mjs';
-import authMiddleware from '../middleware/authMiddleware.mjs';
+import authMiddleware from '../middleware/auth/authMiddleware.mjs';
 
 const router = express.Router();
 

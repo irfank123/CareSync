@@ -12,7 +12,7 @@ import {
   createStaffValidation,
   updateStaffValidation
 } from '../controllers/staffController.mjs';
-import authMiddleware from '../middleware/authMiddleware.mjs';
+import authMiddleware from '../middleware/auth/authMiddleware.mjs';
 
 const router = express.Router();
 

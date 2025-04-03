@@ -2,7 +2,7 @@
 
 import express from 'express';
 import patientController from '../controllers/patientController.mjs';
-import authMiddleware from '../middleware/authMiddleware.mjs';
+import authMiddleware from '../middleware/auth/authMiddleware.mjs';
 
 const router = express.Router();
 

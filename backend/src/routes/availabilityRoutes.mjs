@@ -14,7 +14,7 @@ import {
   createTimeSlotValidation,
   updateTimeSlotValidation
 } from '../controllers/availabilityController.mjs';
-import authMiddleware from '../middleware/authMiddleware.mjs';
+import authMiddleware from '../middleware/auth/authMiddleware.mjs';
 
 const router = express.Router();
 

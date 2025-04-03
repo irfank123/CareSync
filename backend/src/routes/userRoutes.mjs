@@ -13,7 +13,7 @@ import {
   updateUserValidation,
   updateProfileValidation
 } from '../controllers/userController.mjs';
-import authMiddleware from '../middleware/authMiddleware.mjs';
+import authMiddleware from '../middleware/auth/authMiddleware.mjs';
 
 const router = express.Router();
 

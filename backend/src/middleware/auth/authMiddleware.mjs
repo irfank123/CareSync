@@ -1,10 +1,10 @@
 // src/middleware/authMiddleware.mjs
 
 import jwt from 'jsonwebtoken';
-import { User, Clinic } from '../models/index.mjs';
-import config from '../config/config.mjs';
-import { AppError } from '../utils/errorHandler.mjs';
-import tokenBlacklistService from '../services/tokenBlacklistService.mjs';
+import { User, Clinic } from '../../models/index.mjs';
+import config from '../../config/config.mjs';
+import { AppError } from '../../utils/errorHandler.mjs';
+import tokenBlacklistService from '../../services/tokenBlacklistService.mjs';
 
 /**
  * Authentication middleware to protect routes
