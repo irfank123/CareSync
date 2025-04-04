@@ -3,21 +3,25 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { User, Doctor, Patient, Clinic, Staff, AuditLog } from '../models/index.mjs';
+import { User, Doctor, Patient, Staff, AuditLog } from '../models/index.mjs';
 import config from '../config/config.mjs';
 import emailService from './emailService.mjs';
+import mongoose from 'mongoose';
 
 /**
  * Unified Authentication Service for all user types
  */
 class AuthService {
   /**
-   * Register a new user (patient, doctor, staff, clinic)
+   * Register a new user (patient, doctor, staff)
    * @param {Object} userData - User registration data
-   * @param {string} userType - Type of user ('patient', 'doctor', 'staff', 'clinic')
+   * @param {string} userType - Type of user ('patient', 'doctor', 'staff')
    * @returns {Object} User data and token
    */
   async registerUser(userData, userType) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
       // Check if user with this email already exists
       const existingUser = await User.findOne({ email: userData.email });
@@ -25,104 +29,82 @@ class AuthService {
         throw new Error('User with this email already exists');
       }
 
-      let user, roleSpecificRecord, token;
+      let user, roleSpecificRecord;
 
-      if (userType === 'clinic') {
-        // Create clinic record
-        const clinic = await Clinic.create({
-          name: userData.name,
-          email: userData.email,
-          phoneNumber: userData.phoneNumber,
-          address: userData.address,
-          passwordHash: userData.password, // Will be hashed by pre-save hook
-          adminFirstName: userData.adminFirstName,
-          adminLastName: userData.adminLastName,
-          verificationStatus: 'pending',
-          emailVerified: false
-        });
+      // Create standard user (patient, doctor, staff)
+      user = await User.create([{
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        email: userData.email,
+        passwordHash: userData.password, // Will be hashed by pre-save hook
+        role: userType,
+        phoneNumber: userData.phoneNumber,
+        isActive: true,
+        clinicId: userData.clinicId
+      }], { session });
 
-        // Create admin user for this clinic
-        user = await User.create({
-          firstName: userData.adminFirstName,
-          lastName: userData.adminLastName,
-          email: userData.email,
-          passwordHash: userData.password,
-          role: 'admin',
-          phoneNumber: userData.phoneNumber,
-          clinicId: clinic._id
-        });
-
-        // Update clinic with admin user ID
-        clinic.adminUserId = user._id;
-        await clinic.save();
-
-        token = this._generateToken(user._id, 'admin', { clinicId: clinic._id });
-        roleSpecificRecord = clinic;
-
-        // Send verification email
-        await this._sendVerificationEmail(userData.email);
-
-      } else {
-        // Create standard user (patient, doctor, staff)
-        user = await User.create({
-          firstName: userData.firstName,
-          lastName: userData.lastName,
-          email: userData.email,
-          passwordHash: userData.password, // Will be hashed by pre-save hook
-          role: userType,
-          phoneNumber: userData.phoneNumber,
-          isActive: true
-        });
-
-        // Create role-specific record
-        if (userType === 'patient') {
-          roleSpecificRecord = await Patient.create({
-            userId: user._id,
-            dateOfBirth: userData.dateOfBirth || new Date(),
-            gender: userData.gender || 'other'
-          });
-        } else if (userType === 'doctor') {
-          roleSpecificRecord = await Doctor.create({
-            userId: user._id,
-            specialties: userData.specialties || [],
-            licenseNumber: userData.licenseNumber || 'TO_BE_VERIFIED',
-            appointmentFee: userData.appointmentFee || 0
-          });
-        } else if (userType === 'staff') {
-          roleSpecificRecord = await Staff.create({
-            userId: user._id,
-            position: userData.position || 'other',
-            department: userData.department || 'General'
-          });
-        }
-
-        token = this._generateToken(user._id, userType);
+      // Create role-specific record
+      if (userType === 'patient') {
+        roleSpecificRecord = await Patient.create([{
+          userId: user[0]._id,
+          dateOfBirth: userData.dateOfBirth || new Date(),
+          gender: userData.gender || 'other'
+        }], { session });
+      } else if (userType === 'doctor') {
+        roleSpecificRecord = await Doctor.create([{
+          userId: user[0]._id,
+          specialties: userData.specialties || [],
+          licenseNumber: userData.licenseNumber || 'TO_BE_VERIFIED',
+          appointmentFee: userData.appointmentFee || 0
+        }], { session });
+      } else if (userType === 'staff') {
+        roleSpecificRecord = await Staff.create([{
+          userId: user[0]._id,
+          position: userData.position || 'other',
+          department: userData.department || 'General'
+        }], { session });
       }
+
+      // Generate token
+      const token = this._generateToken(user[0]._id, userType, { 
+        clinicId: userData.clinicId 
+      });
 
       // Try to send welcome email
       try {
-        await emailService.sendWelcomeEmail(user.email, user.firstName, userType);
+        await emailService.sendWelcomeEmail(user[0].email, user[0].firstName, userType);
       } catch (emailError) {
         console.error('Welcome email error:', emailError);
         // Continue registration even if email fails
       }
 
       // Create audit log
-      await AuditLog.create({
-        userId: user._id,
+      await AuditLog.create([{
+        userId: user[0]._id,
         action: 'create',
         resource: 'user',
-        resourceId: user._id,
+        resourceId: user[0]._id,
         details: {
           userType,
-          email: user.email
+          email: user[0].email
         }
-      });
+      }], { session });
 
-      return { user, roleSpecificRecord, token };
+      // Commit the transaction
+      await session.commitTransaction();
+
+      return { 
+        user: this._sanitizeUserData(user[0]), 
+        roleSpecificRecord: roleSpecificRecord ? roleSpecificRecord[0] : null, 
+        token 
+      };
     } catch (error) {
+      // Abort transaction on error
+      await session.abortTransaction();
       console.error('Registration error:', error);
       throw new Error(error.message || 'Registration failed');
+    } finally {
+      session.endSession();
     }
   }
 
@@ -155,16 +137,11 @@ class AuthService {
       // Check if MFA is enabled
       if (user.mfaEnabled) {
         // Generate and send MFA code
-        const mfaCode = this._generateMfaCode();
-        
-        // Store MFA code and expiry
-        user.mfaToken = mfaCode.hashedToken;
-        user.mfaTokenExpires = mfaCode.expires;
-        await user.save();
+        const mfaCode = this._generateMfaCode(user);
         
         // Send MFA code to user
         if (user.mfaMethod === 'sms') {
-          // Send SMS (implementation dependent on SMS service)
+          // Implementation for SMS would go here
           console.log(`Would send SMS with code ${mfaCode.originalToken} to ${user.phoneNumber}`);
         } else {
           // Default to email
@@ -177,7 +154,7 @@ class AuthService {
         };
       }
 
-      // Get role-specific data if needed
+      // Get role-specific data
       let roleData = null;
       if (user.role === 'patient') {
         roleData = await Patient.findOne({ userId: user._id });
@@ -185,8 +162,6 @@ class AuthService {
         roleData = await Doctor.findOne({ userId: user._id });
       } else if (user.role === 'staff') {
         roleData = await Staff.findOne({ userId: user._id });
-      } else if (user.role === 'admin' && user.clinicId) {
-        roleData = await Clinic.findById(user.clinicId);
       }
 
       // Update last login
@@ -262,8 +237,6 @@ class AuthService {
         roleData = await Doctor.findOne({ userId: user._id });
       } else if (user.role === 'staff') {
         roleData = await Staff.findOne({ userId: user._id });
-      } else if (user.role === 'admin' && user.clinicId) {
-        roleData = await Clinic.findById(user.clinicId);
       }
 
       // Update last login
@@ -306,6 +279,9 @@ class AuthService {
    * @returns {Object} User data and token
    */
   async handleAuth0Login(auth0Profile, userType) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
       if (!auth0Profile || !auth0Profile.sub) {
         throw new Error('Invalid Auth0 profile');
@@ -320,7 +296,7 @@ class AuthService {
       
       if (!user) {
         // Create new user
-        user = await User.create({
+        user = await User.create([{
           firstName: auth0Profile.given_name || auth0Profile.nickname || 'User',
           lastName: auth0Profile.family_name || '',
           email: auth0Profile.email,
@@ -330,41 +306,43 @@ class AuthService {
           isActive: true,
           emailVerified: auth0Profile.email_verified || false,
           profileImageUrl: auth0Profile.picture
-        });
+        }], { session });
         
         // Create role-specific record
         if (userType === 'patient') {
-          await Patient.create({
-            userId: user._id,
+          await Patient.create([{
+            userId: user[0]._id,
             dateOfBirth: new Date(),
             gender: 'other'
-          });
+          }], { session });
         } else if (userType === 'doctor') {
-          await Doctor.create({
-            userId: user._id,
+          await Doctor.create([{
+            userId: user[0]._id,
             specialties: [],
             licenseNumber: 'AUTH0_TO_BE_VERIFIED',
             appointmentFee: 0
-          });
+          }], { session });
         }
 
         // Create audit log
-        await AuditLog.create({
-          userId: user._id,
+        await AuditLog.create([{
+          userId: user[0]._id,
           action: 'create',
           resource: 'user',
           details: {
             userType,
-            email: user.email,
-            auth0Id: user.auth0Id
+            email: user[0].email,
+            auth0Id: user[0].auth0Id
           }
-        });
+        }], { session });
+
+        await session.commitTransaction();
+        user = user[0];
       } else {
         // Update existing user's last login
         user.lastLogin = new Date();
         
-        // If user exists but doesn't have an Auth0 ID, this could be problematic
-        // In production, you'd want a conflict resolution strategy
+        // If user exists but role doesn't match, log a warning
         if (user.role !== userType) {
           console.warn(`User ${user.email} exists with role ${user.role} but trying to login as ${userType}`);
         }
@@ -380,8 +358,12 @@ class AuthService {
         token
       };
     } catch (error) {
+      // Abort transaction on error
+      await session.abortTransaction();
       console.error('Auth0 login error:', error);
       throw new Error(error.message || 'Authentication failed');
+    } finally {
+      session.endSession();
     }
   }
 
@@ -400,7 +382,17 @@ class AuthService {
       }
       
       // Generate reset token
-      const resetToken = this._generateResetToken(user);
+      const resetToken = crypto.randomBytes(20).toString('hex');
+
+      // Hash token and set to resetPasswordToken field
+      user.resetPasswordToken = crypto
+        .createHash('sha256')
+        .update(resetToken)
+        .digest('hex');
+
+      // Set expire
+      user.resetPasswordExpire = Date.now() + config.auth.passwordResetExpiry;
+
       await user.save({ validateBeforeSave: false });
       
       // Create reset URL
@@ -451,6 +443,7 @@ class AuthService {
       user.passwordHash = newPassword; // Will be hashed by pre-save hook
       user.resetPasswordToken = undefined;
       user.resetPasswordExpire = undefined;
+      user.passwordChangedAt = Date.now();
       
       await user.save();
       
@@ -502,6 +495,7 @@ class AuthService {
       
       // Set new password
       user.passwordHash = newPassword;
+      user.passwordChangedAt = Date.now();
       await user.save();
       
       // Create audit log
@@ -544,8 +538,6 @@ class AuthService {
         roleData = await Doctor.findOne({ userId: user._id });
       } else if (user.role === 'staff') {
         roleData = await Staff.findOne({ userId: user._id });
-      } else if (user.role === 'admin' && user.clinicId) {
-        roleData = await Clinic.findById(user.clinicId);
       }
       
       return {
@@ -555,21 +547,6 @@ class AuthService {
     } catch (error) {
       console.error('Get user profile error:', error);
       throw new Error('Failed to retrieve user profile');
-    }
-  }
-
-  /**
-   * Register a new clinic
-   * @param {Object} clinicData - Clinic registration data
-   * @returns {Object} New clinic data and token
-   */
-  async registerClinic(clinicData) {
-    try {
-      // Delegate to the unified register function
-      return await this.registerUser(clinicData, 'clinic');
-    } catch (error) {
-      console.error('Clinic registration error:', error);
-      throw new Error(error.message || 'Registration failed');
     }
   }
 
@@ -635,29 +612,46 @@ class AuthService {
    */
   async verifyEmail(email, code) {
     try {
-      // Find user or clinic by email
-      const user = await User.findOne({ email });
+      // Find user by email
+      const user = await User.findOne({ 
+        email,
+        emailVerificationExpire: { $gt: Date.now() }
+      }).select('+emailVerificationToken');
       
       if (!user) {
-        // Try to find clinic
-        const clinic = await Clinic.findOne({ email });
-        
-        if (!clinic) {
-          throw new Error('Email not found');
-        }
-        
-        // In a real implementation, verify the code
-        // For now, just mark as verified
-        clinic.emailVerified = true;
-        await clinic.save();
-        
-        return true;
+        throw new Error('Invalid or expired verification code');
       }
       
-      // In a real implementation, verify the code
-      // For now, just mark as verified
+      // Hash the code
+      const hashedCode = crypto
+        .createHash('sha256')
+        .update(code)
+        .digest('hex');
+      
+      // Check if code matches
+      if (hashedCode !== user.emailVerificationToken) {
+        throw new Error('Invalid verification code');
+      }
+      
+      // Mark email as verified
       user.emailVerified = true;
+      user.emailVerificationToken = undefined;
+      user.emailVerificationExpire = undefined;
+      
       await user.save();
+      
+      // Create audit log
+      await AuditLog.create({
+        userId: user._id,
+        action: 'update',
+        resource: 'user',
+        resourceId: user._id,
+        details: {
+          field: 'emailVerified',
+          oldValue: false,
+          newValue: true
+        }
+      });
       
       return true;
     } catch (error) {
@@ -705,17 +699,18 @@ class AuthService {
       .digest('hex');
 
     // Set expire
-    user.resetPasswordExpire = Date.now() + 60 * 60 * 1000; // 1 hour
+    user.resetPasswordExpire = Date.now() + config.auth.passwordResetExpiry;
 
     return resetToken;
   }
 
   /**
    * Generate MFA code
-   * @returns {Object} MFA code and expiry
+   * @param {Object} user - User object
+   * @returns {Object} MFA code info
    * @private
    */
-  _generateMfaCode() {
+  _generateMfaCode(user) {
     // Generate a 6-digit code
     const originalToken = Math.floor(100000 + Math.random() * 900000).toString();
     
@@ -725,33 +720,14 @@ class AuthService {
       .update(originalToken)
       .digest('hex');
     
-    // Set expiry to 10 minutes
-    const expires = Date.now() + 10 * 60 * 1000;
+    // Set on user object
+    user.mfaToken = hashedToken;
+    user.mfaTokenExpires = Date.now() + config.auth.mfaTokenExpiry;
     
-    return { originalToken, hashedToken, expires };
-  }
-
-  /**
-   * Send verification email
-   * @param {string} email - Email address
-   * @returns {boolean} Success status
-   * @private
-   */
-  async _sendVerificationEmail(email) {
-    // Generate a verification code
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    // Save the user
+    user.save();
     
-    // Here, you would typically store this code in the database
-    // associated with the user and with an expiration time
-    
-    // Use the templated email service
-    try {
-      await emailService.sendVerificationEmail(email, verificationCode);
-      return true;
-    } catch (error) {
-      console.error('Verification email error:', error);
-      throw new Error('Failed to send verification email');
-    }
+    return { originalToken, hashedToken, expires: user.mfaTokenExpires };
   }
 
   /**
@@ -767,6 +743,8 @@ class AuthService {
     delete userObj.resetPasswordExpire;
     delete userObj.mfaToken;
     delete userObj.mfaTokenExpires;
+    delete userObj.emailVerificationToken;
+    delete userObj.emailVerificationExpire;
     return userObj;
   }
 }

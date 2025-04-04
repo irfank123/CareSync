@@ -14,41 +14,88 @@ import {
   createTimeSlotValidation,
   updateTimeSlotValidation
 } from '../controllers/availabilityController.mjs';
-import authMiddleware from '../middleware/auth/authMiddleware.mjs';
+import { 
+  authMiddleware, 
+  auditMiddleware,
+  cacheMiddleware 
+} from '../middleware/index.mjs';
 
 const router = express.Router();
 
 // Public routes for viewing availability
-router.get('/doctor/:doctorId/slots', getTimeSlots);
-router.get('/doctor/:doctorId/slots/available', getAvailableTimeSlots);
+router.get(
+  '/doctor/:doctorId/slots', 
+  cacheMiddleware.cacheResponse(60), // Cache for 1 minute
+  cacheMiddleware.setCacheHeaders({ isPublic: true, maxAge: 300 }), // 5 minutes for public caching
+  getTimeSlots
+);
+
+router.get(
+  '/doctor/:doctorId/slots/available', 
+  cacheMiddleware.cacheResponse(30), // Cache for 30 seconds
+  cacheMiddleware.setCacheHeaders({ isPublic: true, maxAge: 300 }), // 5 minutes for public caching
+  getAvailableTimeSlots
+);
 
 // Protected routes for managing availability
 router.use(authMiddleware.authenticate);
 
 // Time slot management
 router.route('/slots')
-  .post(authMiddleware.restrictTo('admin', 'doctor', 'staff'), createTimeSlotValidation, createTimeSlot);
+  .post(
+    authMiddleware.restrictTo('admin', 'doctor', 'staff'), 
+    createTimeSlotValidation,
+    auditMiddleware.logCreation('timeslot'),
+    cacheMiddleware.clearCacheOnWrite('timeslots'),
+    createTimeSlot
+  );
 
 router.route('/slots/:slotId')
-  .put(authMiddleware.restrictTo('admin', 'doctor', 'staff'), updateTimeSlotValidation, updateTimeSlot)
-  .delete(authMiddleware.restrictTo('admin', 'doctor', 'staff'), deleteTimeSlot);
+  .put(
+    authMiddleware.restrictTo('admin', 'doctor', 'staff'),
+    updateTimeSlotValidation,
+    auditMiddleware.logUpdate('timeslot'),
+    cacheMiddleware.clearCacheOnWrite('timeslots'),
+    updateTimeSlot
+  )
+  .delete(
+    authMiddleware.restrictTo('admin', 'doctor', 'staff'),
+    auditMiddleware.logDeletion('timeslot'),
+    cacheMiddleware.clearCacheOnWrite('timeslots'),
+    deleteTimeSlot
+  );
 
 // Schedule generation, import/export
-router.post('/doctor/:doctorId/generate', 
+router.post(
+  '/doctor/:doctorId/generate', 
   authMiddleware.restrictTo('admin', 'doctor', 'staff'), 
-  generateTimeSlots);
+  auditMiddleware.logCreation('timeslots'),
+  cacheMiddleware.clearCacheOnWrite('timeslots'),
+  generateTimeSlots
+);
 
 // Google Calendar integration
-router.post('/doctor/:doctorId/import/google', 
+router.post(
+  '/doctor/:doctorId/import/google', 
   authMiddleware.restrictTo('admin', 'doctor', 'staff'), 
-  importFromGoogle);
+  auditMiddleware.logCreation('timeslots'),
+  cacheMiddleware.clearCacheOnWrite('timeslots'),
+  importFromGoogle
+);
 
-router.post('/doctor/:doctorId/export/google', 
+router.post(
+  '/doctor/:doctorId/export/google', 
   authMiddleware.restrictTo('admin', 'doctor', 'staff'), 
-  exportToGoogle);
+  auditMiddleware.logUpdate('timeslots'),
+  exportToGoogle
+);
 
-router.post('/doctor/:doctorId/sync/google', 
+router.post(
+  '/doctor/:doctorId/sync/google', 
   authMiddleware.restrictTo('admin', 'doctor', 'staff'), 
-  syncWithGoogle);
+  auditMiddleware.logUpdate('timeslots'),
+  cacheMiddleware.clearCacheOnWrite('timeslots'),
+  syncWithGoogle
+);
 
 export default router;

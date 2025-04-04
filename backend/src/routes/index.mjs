@@ -2,6 +2,7 @@
 
 import express from 'express';
 import authRoutes from './authRoutes.mjs';
+import clinicAuthRoutes from './clinicAuthRoutes.mjs';
 import adminRoutes from './adminRoutes.mjs';
 import userRoutes from './userRoutes.mjs';
 import patientRoutes from './patientRoutes.mjs';
@@ -29,8 +30,11 @@ const setupRoutes = (app) => {
   // Apply rate limiting to all API routes
   apiRouter.use(rateLimitMiddleware.apiLimiter);
   
-  // Auth routes - more restrictive rate limiting
-  apiRouter.use('/auth', rateLimitMiddleware.authLimiter, authRoutes);
+  // Auth routes
+  apiRouter.use('/auth', authRoutes);
+  
+  // Clinic auth routes
+  apiRouter.use('/auth/clinic', clinicAuthRoutes);
   
   // Admin routes
   apiRouter.use('/admin', adminRoutes);

@@ -12,7 +12,11 @@ import {
   createStaffValidation,
   updateStaffValidation
 } from '../controllers/staffController.mjs';
-import authMiddleware from '../middleware/auth/authMiddleware.mjs';
+import { 
+  authMiddleware, 
+  auditMiddleware,
+  cacheMiddleware 
+} from '../middleware/index.mjs';
 
 const router = express.Router();
 
@@ -20,17 +24,48 @@ const router = express.Router();
 router.use(authMiddleware.authenticate);
 
 // Staff-specific routes (for staff users)
-router.get('/me', getMyProfile);
-router.put('/me', updateStaffValidation, updateMyProfile);
+router.get(
+  '/me', 
+  authMiddleware.restrictTo('staff'),
+  cacheMiddleware.cacheResponse(60), // Cache for 1 minute
+  auditMiddleware.logAccess('staff-profile'),
+  getMyProfile
+);
+
+router.put(
+  '/me', 
+  authMiddleware.restrictTo('staff'),
+  updateStaffValidation,
+  auditMiddleware.logUpdate('staff-profile'),
+  updateMyProfile
+);
 
 // Admin/Clinic Admin routes
 router.route('/')
-  .get(authMiddleware.restrictTo('admin'), getStaffMembers) // Auth checking is also done in the controller for clinic admins
-  .post(authMiddleware.restrictTo('admin'), createStaffValidation, createStaffMember); // Auth checking is also done in the controller for clinic admins
+  .get(
+    cacheMiddleware.cacheResponse(120), // Cache for 2 minutes
+    getStaffMembers  // Auth checking is done in the controller
+  )
+  .post(
+    createStaffValidation,
+    auditMiddleware.logCreation('staff'),
+    createStaffMember  // Auth checking is done in the controller
+  );
 
 router.route('/:id')
-  .get(getStaffMember) // Auth checking is done in the controller
-  .put(updateStaffValidation, updateStaffMember) // Auth checking is done in the controller
-  .delete(deleteStaffMember); // Auth checking is done in the controller
+  .get(
+    cacheMiddleware.cacheResponse(120), // Cache for 2 minutes
+    auditMiddleware.logAccess('staff'),
+    getStaffMember  // Auth checking is done in the controller
+  )
+  .put(
+    updateStaffValidation,
+    auditMiddleware.logUpdate('staff'),
+    updateStaffMember  // Auth checking is done in the controller
+  )
+  .delete(
+    auditMiddleware.logDeletion('staff'),
+    deleteStaffMember  // Auth checking is done in the controller
+  );
 
 export default router;

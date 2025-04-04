@@ -1,155 +1,51 @@
 // src/controllers/userController.mjs
 
-import { validationResult } from 'express-validator';
-import { check } from 'express-validator';
+import BaseController from './base/baseController.mjs';
 import userService from '../services/userService.mjs';
-import { asyncHandler, AppError, formatValidationErrors } from '../utils/errorHandler.mjs';
+import { errorMiddleware } from '../middleware/index.mjs';
+import { AppError } from '../utils/errorHandler.mjs';
 
 /**
- * @desc    Get all users (with filters and pagination)
- * @route   GET /api/users
- * @access  Private (Admin or Clinic Admin)
+ * User Controller extending the BaseController
  */
-export const getUsers = asyncHandler(async (req, res, next) => {
-  // Extract query parameters for filtering and pagination
-  const {
-    page = 1,
-    limit = 10,
-    role,
-    search,
-    sort = 'createdAt',
-    order = 'desc',
-    clinicId
-  } = req.query;
-
-  // Get the user's role and clinic info from auth middleware
-  const userRole = req.userRole;
-  const userClinicId = req.clinicId;
-
-  // Only allow clinic admins to view their own clinic's users
-  let filterClinicId = clinicId;
-  if (userRole !== 'admin' && userRole !== 'staff') {
-    if (userClinicId) {
-      filterClinicId = userClinicId;
-    } else {
-      return next(new AppError('You are not authorized to view these users', 403));
-    }
-  }
-
-  const result = await userService.getAllUsers({
-    page: parseInt(page, 10),
-    limit: parseInt(limit, 10),
-    role,
-    search,
-    sort,
-    order,
-    clinicId: filterClinicId
-  });
-  
-  res.status(200).json({
-    success: true,
-    count: result.users.length,
-    total: result.total,
-    totalPages: result.totalPages,
-    currentPage: result.currentPage,
-    data: result.users
-  });
-});
-
-/**
- * @desc    Get single user
- * @route   GET /api/users/:id
- * @access  Private (Admin, Own User, or Related Clinic)
- */
-export const getUser = asyncHandler(async (req, res, next) => {
-  const userId = req.params.id;
-  
-  // Check if user is requesting their own profile
-  const isSelfRequest = req.user._id.toString() === userId;
-  
-  // Determine if user has permissions to view this profile
-  const canViewProfile = 
-    isSelfRequest || 
-    req.userRole === 'admin' || 
-    (req.isClinicAdmin && req.clinicId);
-
-  if (!canViewProfile) {
-    return next(new AppError('You are not authorized to view this profile', 403));
-  }
-
-  const user = await userService.getUserById(userId);
-  
-  if (!user) {
-    return next(new AppError('User not found', 404));
-  }
-  
-  res.status(200).json({
-    success: true,
-    data: user
-  });
-});
-
-/**
- * @desc    Create new user
- * @route   POST /api/users
- * @access  Private (Admin or Clinic Admin)
- */
-export const createUser = asyncHandler(async (req, res, next) => {
-  // Check for validation errors
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json(formatValidationErrors(errors.array()));
-  }
-
-  // Check if user has permission to create this type of user
-  if (req.userRole !== 'admin') {
-    // Clinic admins can only create staff, doctors, and patients
-    const allowedRoles = ['doctor', 'staff', 'patient'];
-    if (!allowedRoles.includes(req.body.role)) {
-      return next(new AppError(`You cannot create users with role: ${req.body.role}`, 403));
-    }
+class UserController extends BaseController {
+  constructor() {
+    super(userService, 'User');
     
-    // Ensure the new user is associated with the admin's clinic
-    req.body.clinicId = req.clinicId;
+    // Bind additional methods
+    this.getProfile = this.getProfile.bind(this);
+    this.updateProfile = this.updateProfile.bind(this);
+    this.searchUsers = this.searchUsers.bind(this);
+    
+    // Wrap with error handling
+    this.getProfile = errorMiddleware.catchAsync(this.getProfile);
+    this.updateProfile = errorMiddleware.catchAsync(this.updateProfile);
+    this.searchUsers = errorMiddleware.catchAsync(this.searchUsers);
   }
-
-  const result = await userService.createUser(req.body, req.user._id);
   
-  res.status(201).json({
-    success: true,
-    data: result
-  });
-});
-
-/**
- * @desc    Update user
- * @route   PUT /api/users/:id
- * @access  Private (Admin, Own User, or Related Clinic)
- */
-export const updateUser = asyncHandler(async (req, res, next) => {
-  // Check for validation errors
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json(formatValidationErrors(errors.array()));
+  /**
+   * Get current user profile
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next function
+   */
+  async getProfile(req, res, next) {
+    const userProfile = await userService.getUserProfile(req.user._id);
+    
+    res.status(200).json({
+      success: true,
+      data: userProfile
+    });
   }
-
-  const userId = req.params.id;
   
-  // Check if user is updating their own profile
-  const isSelfUpdate = req.user._id.toString() === userId;
-  
-  // Determine if user has permissions to update this profile
-  const canUpdateProfile = 
-    isSelfUpdate || 
-    req.userRole === 'admin' || 
-    (req.isClinicAdmin && req.clinicId);
-
-  if (!canUpdateProfile) {
-    return next(new AppError('You are not authorized to update this profile', 403));
-  }
-
-  // If it's a self-update by non-admin, restrict what fields can be updated
-  if (isSelfUpdate && req.userRole !== 'admin') {
+  /**
+   * Update current user profile
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next function
+   */
+  async updateProfile(req, res, next) {
+    // Restrict what fields can be updated
     const allowedFields = [
       'firstName', 'lastName', 'phoneNumber', 'profileImageUrl', 'preferences'
     ];
@@ -162,141 +58,233 @@ export const updateUser = asyncHandler(async (req, res, next) => {
       }
     });
     
-    // Replace req.body with filtered body
-    req.body = filteredBody;
-  }
-
-  const user = await userService.updateUser(userId, req.body);
-  
-  if (!user) {
-    return next(new AppError('User not found', 404));
+    const user = await userService.update(req.user._id, filteredBody);
+    
+    res.status(200).json({
+      success: true,
+      data: user
+    });
   }
   
-  res.status(200).json({
-    success: true,
-    data: user
-  });
-});
-
-/**
- * @desc    Delete user
- * @route   DELETE /api/users/:id
- * @access  Private (Admin or Clinic Admin)
- */
-export const deleteUser = asyncHandler(async (req, res, next) => {
-  const userId = req.params.id;
-  
-  // Only admins and clinic admins can delete users
-  if (req.userRole !== 'admin' && !(req.isClinicAdmin && req.clinicId)) {
-    return next(new AppError('You are not authorized to delete users', 403));
-  }
-
-  // Prevent users from deleting themselves
-  if (req.user._id.toString() === userId) {
-    return next(new AppError('You cannot delete your own account', 400));
-  }
-
-  // Check if the user exists and belongs to the clinic (for clinic admins)
-  const userToDelete = await userService.getUserById(userId);
-  
-  if (!userToDelete) {
-    return next(new AppError('User not found', 404));
+  /**
+   * Search users by criteria
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next function
+   */
+  async searchUsers(req, res, next) {
+    const { query, fields, limit } = req.query;
+    
+    const searchCriteria = {
+      query,
+      fields: fields ? fields.split(',') : [],
+      limit: limit ? parseInt(limit, 10) : 10
+    };
+    
+    const users = await userService.searchUsers(searchCriteria);
+    
+    res.status(200).json({
+      success: true,
+      count: users.length,
+      data: users
+    });
   }
   
-  // Clinic admins can only delete users from their clinic
-  if (req.isClinicAdmin && req.clinicId) {
-    if (!userToDelete.clinicId || userToDelete.clinicId.toString() !== req.clinicId.toString()) {
-      return next(new AppError('You can only delete users from your clinic', 403));
+  /**
+   * Override getAll to enforce permissions
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next function
+   */
+  async getAll(req, res, next) {
+    // Get the user's role and clinic info from auth middleware
+    const userRole = req.userRole;
+    const userClinicId = req.clinicId;
+    
+    // Only allow clinic admins to view their own clinic's users
+    let filterClinicId = req.query.clinicId;
+    if (userRole !== 'admin' && userRole !== 'staff') {
+      if (userClinicId) {
+        req.query.clinicId = userClinicId;
+      } else {
+        return next(new AppError('You are not authorized to view these users', 403));
+      }
     }
+    
+    // Call parent implementation
+    return super.getAll(req, res, next);
   }
-
-  await userService.deleteUser(userId);
   
-  res.status(200).json({
-    success: true,
-    message: 'User deleted successfully'
-  });
-});
-
-/**
- * @desc    Update profile for current user
- * @route   PUT /api/users/profile
- * @access  Private
- */
-export const updateProfile = asyncHandler(async (req, res, next) => {
-  // Check for validation errors
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json(formatValidationErrors(errors.array()));
-  }
-
-  // Restrict what fields can be updated
-  const allowedFields = [
-    'firstName', 'lastName', 'phoneNumber', 'profileImageUrl', 'preferences'
-  ];
-  
-  // Filter request body to only include allowed fields
-  const filteredBody = {};
-  Object.keys(req.body).forEach(key => {
-    if (allowedFields.includes(key)) {
-      filteredBody[key] = req.body[key];
+  /**
+   * Override getOne to check self-access or role-based access
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next function
+   */
+  async getOne(req, res, next) {
+    const userId = req.params.id;
+    
+    // Check if user is requesting their own profile
+    const isSelfRequest = req.user._id.toString() === userId;
+    
+    // Determine if user has permissions to view this profile
+    const canViewProfile = 
+      isSelfRequest || 
+      req.userRole === 'admin' || 
+      (req.isClinicAdmin && req.clinicId);
+      
+    if (!canViewProfile) {
+      return next(new AppError('You are not authorized to view this profile', 403));
     }
-  });
-
-  const user = await userService.updateUser(req.user._id, filteredBody);
+    
+    // Call parent implementation
+    return super.getOne(req, res, next);
+  }
   
-  res.status(200).json({
-    success: true,
-    data: user
-  });
-});
-
-/**
- * @desc    Get current user profile
- * @route   GET /api/users/profile
- * @access  Private
- */
-export const getProfile = asyncHandler(async (req, res, next) => {
-  const user = await userService.getUserById(req.user._id);
+  /**
+   * Override create to enforce role-based permissions
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next function
+   */
+  async create(req, res, next) {
+    // Check if user has permission to create this type of user
+    if (req.userRole !== 'admin') {
+      // Clinic admins can only create staff, doctors, and patients
+      const allowedRoles = ['doctor', 'staff', 'patient'];
+      if (!allowedRoles.includes(req.body.role)) {
+        return next(new AppError(`You cannot create users with role: ${req.body.role}`, 403));
+      }
+      
+      // Ensure the new user is associated with the admin's clinic
+      req.body.clinicId = req.clinicId;
+    }
+    
+    // Call parent implementation
+    return super.create(req, res, next);
+  }
   
-  res.status(200).json({
-    success: true,
-    data: user
-  });
-});
+  /**
+   * Override update to check self-access or role-based access
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next function
+   */
+  async update(req, res, next) {
+    const userId = req.params.id;
+    
+    // Check if user is updating their own profile
+    const isSelfUpdate = req.user._id.toString() === userId;
+    
+    // Determine if user has permissions to update this profile
+    const canUpdateProfile = 
+      isSelfUpdate || 
+      req.userRole === 'admin' || 
+      (req.isClinicAdmin && req.clinicId);
+      
+    if (!canUpdateProfile) {
+      return next(new AppError('You are not authorized to update this profile', 403));
+    }
+    
+    // If it's a self-update by non-admin, restrict what fields can be updated
+    if (isSelfUpdate && req.userRole !== 'admin') {
+      const allowedFields = [
+        'firstName', 'lastName', 'phoneNumber', 'profileImageUrl', 'preferences'
+      ];
+      
+      // Filter request body to only include allowed fields
+      const filteredBody = {};
+      Object.keys(req.body).forEach(key => {
+        if (allowedFields.includes(key)) {
+          filteredBody[key] = req.body[key];
+        }
+      });
+      
+      // Replace req.body with filtered body
+      req.body = filteredBody;
+    }
+    
+    // Call parent implementation
+    return super.update(req, res, next);
+  }
+  
+  /**
+   * Override delete to enforce permissions and prevent self-deletion
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next function
+   */
+  async delete(req, res, next) {
+    const userId = req.params.id;
+    
+    // Only admins and clinic admins can delete users
+    if (req.userRole !== 'admin' && !(req.isClinicAdmin && req.clinicId)) {
+      return next(new AppError('You are not authorized to delete users', 403));
+    }
 
-// Validation middleware
+    // Prevent users from deleting themselves
+    if (req.user._id.toString() === userId) {
+      return next(new AppError('You cannot delete your own account', 400));
+    }
+
+    // Check if the user exists and belongs to the clinic (for clinic admins)
+    if (req.isClinicAdmin && req.clinicId) {
+      const userToDelete = await userService.getById(userId);
+      
+      if (!userToDelete) {
+        return next(new AppError('User not found', 404));
+      }
+      
+      // Verify clinic ID
+      if (!userToDelete.clinicId || userToDelete.clinicId.toString() !== req.clinicId.toString()) {
+        return next(new AppError('You can only delete users from your clinic', 403));
+      }
+    }
+    
+    // Call parent implementation
+    return super.delete(req, res, next);
+  }
+}
+
+// Create a single instance of UserController
+const userController = new UserController();
+
+// Export methods separately for easy integration with existing routes
+export const {
+  getAll: getUsers,
+  getOne: getUser,
+  create: createUser,
+  update: updateUser,
+  delete: deleteUser,
+  getProfile,
+  updateProfile,
+  searchUsers
+} = userController;
+
+// Export validation rules
 export const createUserValidation = [
-  check('firstName', 'First name is required').not().isEmpty().trim(),
-  check('lastName', 'Last name is required').not().isEmpty().trim(),
-  check('email', 'Please include a valid email').isEmail().normalizeEmail(),
-  check('password')
-    .isLength({ min: 8 })
-    .withMessage('Password must be at least 8 characters')
-    .matches(/\d/)
-    .withMessage('Password must contain a number')
-    .matches(/[A-Z]/)
-    .withMessage('Password must contain an uppercase letter')
-    .matches(/[a-z]/)
-    .withMessage('Password must contain a lowercase letter')
-    .matches(/[!@#$%^&*(),.?":{}|<>]/)
-    .withMessage('Password must contain a special character'),
-  check('role', 'Role must be patient, doctor, staff or admin').isIn(['patient', 'doctor', 'staff', 'admin']),
-  check('phoneNumber', 'Valid phone number is required').not().isEmpty()
+  // Use the validation middleware rules instead of duplicating here
 ];
 
 export const updateUserValidation = [
-  check('firstName', 'First name is required').optional().not().isEmpty().trim(),
-  check('lastName', 'Last name is required').optional().not().isEmpty().trim(),
-  check('email', 'Please include a valid email').optional().isEmail().normalizeEmail(),
-  check('phoneNumber', 'Valid phone number is required').optional().not().isEmpty(),
-  check('isActive', 'isActive must be a boolean').optional().isBoolean()
+  // Use the validation middleware rules instead of duplicating here
 ];
 
 export const updateProfileValidation = [
-  check('firstName', 'First name is required').optional().not().isEmpty().trim(),
-  check('lastName', 'Last name is required').optional().not().isEmpty().trim(),
-  check('phoneNumber', 'Valid phone number is required').optional().not().isEmpty(),
-  check('preferences.theme', 'Theme must be light, dark or system').optional().isIn(['light', 'dark', 'system']),
-  check('preferences.language', 'Please provide a valid language code').optional().isLength({ min: 2, max: 5 })
+  // Use the validation middleware rules instead of duplicating here
 ];
+
+// Export default with all methods for compatibility
+export default {
+  getUsers,
+  getUser,
+  createUser,
+  updateUser,
+  deleteUser,
+  getProfile,
+  updateProfile,
+  searchUsers,
+  createUserValidation,
+  updateUserValidation,
+  updateProfileValidation
+};

@@ -1,7 +1,9 @@
 // src/services/clinicAuthService.mjs
 
 import jwt from 'jsonwebtoken';
-import { Clinic, User } from '../models/index.mjs';
+import crypto from 'crypto';
+import mongoose from 'mongoose';
+import { Clinic, User, AuditLog } from '../models/index.mjs';
 import config from '../config/config.mjs';
 import emailService from './emailService.mjs';
 
@@ -15,6 +17,9 @@ class ClinicAuthService {
    * @returns {Object} New clinic data and token
    */
   async registerClinic(clinicData) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
       // Check if clinic already exists
       const existingClinic = await Clinic.findOne({ email: clinicData.email });
@@ -23,7 +28,7 @@ class ClinicAuthService {
       }
       
       // Create clinic admin user
-      const adminUser = await User.create({
+      const adminUser = await User.create([{
         email: clinicData.email,
         firstName: clinicData.adminFirstName,
         lastName: clinicData.adminLastName,
@@ -31,48 +36,70 @@ class ClinicAuthService {
         role: 'admin',
         phoneNumber: clinicData.phoneNumber || '',
         emailVerified: false
-      });
+      }], { session });
       
       // Create clinic
-      const clinic = await Clinic.create({
+      const clinic = await Clinic.create([{
         name: clinicData.name,
         email: clinicData.email,
         phone: clinicData.phoneNumber,
         address: clinicData.address,
         password: clinicData.password, // Will be hashed by pre-save hook
-        adminUserId: adminUser._id,
+        adminUserId: adminUser[0]._id,
         verificationStatus: 'pending',
         // Additional clinic fields as needed
         subscriptionTier: 'basic',
         verificationDocuments: clinicData.verificationDocuments || []
-      });
+      }], { session });
       
       // Update user with clinic reference
-      adminUser.clinicId = clinic._id;
-      await adminUser.save();
+      await User.findByIdAndUpdate(
+        adminUser[0]._id,
+        { clinicId: clinic[0]._id },
+        { session }
+      );
+      
+      // Create audit log
+      await AuditLog.create([{
+        userId: adminUser[0]._id,
+        action: 'create',
+        resource: 'clinic',
+        resourceId: clinic[0]._id,
+        details: {
+          name: clinicData.name,
+          email: clinicData.email
+        }
+      }], { session });
       
       // Send verification email
       try {
-        await this.sendVerificationEmail(clinic.email);
+        await this.sendVerificationEmail(clinic[0].email);
       } catch (emailError) {
         console.error('Failed to send verification email:', emailError);
         // Continue with registration even if email fails
       }
       
       // Generate token
-      const token = this.generateClinicToken(clinic);
+      const token = this.generateClinicToken(clinic[0]);
+      
+      // Commit the transaction
+      await session.commitTransaction();
       
       return {
-        clinic: this.sanitizeClinicData(clinic),
-        user: adminUser,
+        clinic: this.sanitizeClinicData(clinic[0]),
+        user: adminUser[0],
         token
       };
     } catch (error) {
+      // Abort transaction on error
+      await session.abortTransaction();
       console.error('Clinic registration error:', error);
       throw new Error(error.message || 'Registration failed');
+    } finally {
+      session.endSession();
     }
   }
-  
+
   /**
    * Authenticate a clinic
    * @param {string} email - Clinic email
@@ -110,6 +137,17 @@ class ClinicAuthService {
       // Update last login time
       clinic.lastLogin = new Date();
       await clinic.save();
+      
+      // Create audit log
+      await AuditLog.create({
+        userId: adminUser._id,
+        action: 'login',
+        resource: 'clinic',
+        resourceId: clinic._id,
+        details: {
+          email: clinic.email
+        }
+      });
       
       return {
         clinic: this.sanitizeClinicData(clinic),
@@ -167,30 +205,6 @@ class ClinicAuthService {
   }
   
   /**
-   * Send verification email to clinic
-   * @param {string} email - Clinic email
-   */
-  async sendVerificationEmail(email) {
-    // Generate verification code
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Store verification code (would typically be saved in database with expiry)
-    // For now, we'll use a placeholder
-    
-    // Send email via email service
-    return await emailService.sendEmail({
-      to: email,
-      subject: 'Verify your CareSync Clinic Account',
-      text: `Your verification code is: ${verificationCode}. This code will expire in 24 hours.`,
-      html: `
-        <h1>Welcome to CareSync!</h1>
-        <p>Your verification code is: <strong>${verificationCode}</strong></p>
-        <p>This code will expire in 24 hours.</p>
-      `
-    });
-  }
-  
-  /**
    * Verify clinic email with verification code
    * @param {string} email - Clinic email 
    * @param {string} code - Verification code
@@ -206,16 +220,17 @@ class ClinicAuthService {
       
       // Find admin user
       const adminUser = await User.findById(clinic.adminUserId);
-      if (adminUser) {
-        adminUser.emailVerified = true;
-        await adminUser.save();
-      }
       
       // In a real implementation, we would check the verification code
       // For this placeholder, we'll just mark as verified
       
       clinic.emailVerified = true;
       await clinic.save();
+      
+      if (adminUser) {
+        adminUser.emailVerified = true;
+        await adminUser.save();
+      }
       
       return true;
     } catch (error) {
@@ -243,8 +258,18 @@ class ClinicAuthService {
       
       await clinic.save();
       
-      // Notify admin about new verification request (placeholder)
-      // This would trigger an email or notification to the platform admin
+      // Create audit log
+      await AuditLog.create({
+        userId: clinic.adminUserId,
+        action: 'update',
+        resource: 'clinic',
+        resourceId: clinicId,
+        details: {
+          field: 'verificationStatus',
+          oldValue: 'pending',
+          newValue: 'in_review'
+        }
+      });
       
       return this.sanitizeClinicData(clinic);
     } catch (error) {
@@ -252,15 +277,15 @@ class ClinicAuthService {
       throw new Error('Could not submit verification documents');
     }
   }
-  
 
+  
   /**
- * Update clinic verification status
- * @param {string} clinicId - Clinic ID
- * @param {string} status - New verification status
- * @param {string} notes - Notes about the verification
- * @returns {Object} Updated clinic
- */
+   * Update clinic verification status
+   * @param {string} clinicId - Clinic ID
+   * @param {string} status - New verification status
+   * @param {string} notes - Notes about the verification
+   * @returns {Object} Updated clinic
+   */
   async updateVerificationStatus(clinicId, status, notes) {
     try {
       const clinic = await Clinic.findById(clinicId);
@@ -283,6 +308,20 @@ class ClinicAuthService {
       
       await clinic.save();
       
+      // Create audit log
+      await AuditLog.create({
+        userId: clinic.adminUserId,
+        action: 'update',
+        resource: 'clinic',
+        resourceId: clinicId,
+        details: {
+          field: 'verificationStatus',
+          oldValue: oldStatus,
+          newValue: status,
+          notes
+        }
+      });
+      
       // Notify clinic about verification status change
       try {
         await emailService.sendClinicVerificationEmail(clinic, status, notes);
@@ -304,18 +343,11 @@ class ClinicAuthService {
    */
   async forgotPassword(email) {
     try {
-      // Find admin user by clinic email
+      // Find clinic by email
       const clinic = await Clinic.findOne({ email });
       
       if (!clinic) {
         // Always return success even if clinic not found to prevent email enumeration
-        return true;
-      }
-      
-      // Find the admin user for this clinic
-      const user = await User.findById(clinic.adminUserId);
-      
-      if (!user) {
         return true;
       }
       
@@ -378,17 +410,29 @@ class ClinicAuthService {
       
       await clinic.save();
       
+      // Create audit log
+      await AuditLog.create({
+        userId: clinic.adminUserId,
+        action: 'update',
+        resource: 'clinic',
+        resourceId: clinic._id,
+        details: {
+          field: 'password',
+          action: 'reset'
+        }
+      });
+      
       return true;
     } catch (error) {
       console.error('Reset password error:', error);
       throw new Error(error.message || 'Password reset failed');
     }
   }
-
+  
   /**
- * Send verification email to clinic
- * @param {string} email - Clinic email
- */
+   * Send verification email to clinic
+   * @param {string} email - Clinic email
+   */
   async sendVerificationEmail(email) {
     // Generate verification code
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -398,7 +442,7 @@ class ClinicAuthService {
     
     // Send email via email service
     return await emailService.sendVerificationEmail(email, verificationCode);
- }
+  }
 }
 
 export default new ClinicAuthService();

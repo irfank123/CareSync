@@ -1,7 +1,6 @@
 // src/controllers/staffController.mjs
 
-import { validationResult } from 'express-validator';
-import { check } from 'express-validator';
+import { check, validationResult } from 'express-validator';
 import staffService from '../services/staffService.mjs';
 import { asyncHandler, AppError, formatValidationErrors } from '../utils/errorHandler.mjs';
 
@@ -34,7 +33,7 @@ export const getStaffMembers = asyncHandler(async (req, res, next) => {
     return next(new AppError('You are not authorized to view staff members', 403));
   }
 
-  const result = await staffService.getAllStaffMembers({
+  const result = await staffService.getAll({
     page: parseInt(page, 10),
     limit: parseInt(limit, 10),
     search,
@@ -47,11 +46,11 @@ export const getStaffMembers = asyncHandler(async (req, res, next) => {
   
   res.status(200).json({
     success: true,
-    count: result.staff.length,
+    count: result.data.length,
     total: result.total,
     totalPages: result.totalPages,
     currentPage: result.currentPage,
-    data: result.staff
+    data: result.data
   });
 });
 
@@ -77,7 +76,7 @@ export const getStaffMember = asyncHandler(async (req, res, next) => {
     return next(new AppError('You are not authorized to view this staff profile', 403));
   }
 
-  const staff = await staffService.getStaffById(staffId);
+  const staff = await staffService.getById(staffId);
   
   if (!staff) {
     return next(new AppError('Staff member not found', 404));
@@ -111,7 +110,7 @@ export const createStaffMember = asyncHandler(async (req, res, next) => {
     req.body.clinicId = req.clinicId;
   }
 
-  const staff = await staffService.createStaff(req.body);
+  const staff = await staffService.create(req.body, req.user._id);
   
   res.status(201).json({
     success: true,
@@ -134,8 +133,8 @@ export const updateStaffMember = asyncHandler(async (req, res, next) => {
   const staffId = req.params.id;
   
   // Check if the requester is the staff member (self-access)
-  const staffUser = await staffService.getStaffUserId(staffId);
-  const isSelfAccess = staffUser && req.user._id.toString() === staffUser.toString();
+  const staffUserId = await staffService.getStaffUserId(staffId);
+  const isSelfAccess = staffUserId && req.user._id.toString() === staffUserId.toString();
   
   // Determine if user has permissions to update this profile
   const canUpdateProfile = 
@@ -163,7 +162,7 @@ export const updateStaffMember = asyncHandler(async (req, res, next) => {
     req.body = filteredBody;
   }
 
-  const staff = await staffService.updateStaff(staffId, req.body);
+  const staff = await staffService.update(staffId, req.body, req.user._id);
   
   if (!staff) {
     return next(new AppError('Staff member not found', 404));
@@ -188,21 +187,26 @@ export const deleteStaffMember = asyncHandler(async (req, res, next) => {
     return next(new AppError('You are not authorized to delete staff members', 403));
   }
 
-  // Check if the staff member exists and belongs to the clinic (for clinic admins)
-  const staffToDelete = await staffService.getStaffById(staffId);
-  
-  if (!staffToDelete) {
-    return next(new AppError('Staff member not found', 404));
-  }
-  
-  // Clinic admins can only delete staff from their clinic
+  // Check if the staff belongs to this clinic (for clinic admins)
   if (req.isClinicAdmin && req.clinicId) {
-    if (!staffToDelete.clinicId || staffToDelete.clinicId.toString() !== req.clinicId.toString()) {
+    const staff = await staffService.getById(staffId);
+    
+    if (!staff) {
+      return next(new AppError('Staff member not found', 404));
+    }
+    
+    // Verify clinic ID
+    if (staff.user && staff.user.clinicId && 
+        staff.user.clinicId.toString() !== req.clinicId.toString()) {
       return next(new AppError('You can only delete staff members from your clinic', 403));
     }
   }
 
-  await staffService.deleteStaff(staffId);
+  const success = await staffService.delete(staffId, req.user._id);
+  
+  if (!success) {
+    return next(new AppError('Staff member not found', 404));
+  }
   
   res.status(200).json({
     success: true,
@@ -221,7 +225,7 @@ export const getMyProfile = asyncHandler(async (req, res, next) => {
     return next(new AppError('Only staff users can access this endpoint', 403));
   }
 
-  const staff = await staffService.getStaffByUserId(req.user._id);
+  const staff = await staffService.getByUserId(req.user._id);
   
   if (!staff) {
     return next(new AppError('Staff profile not found', 404));
@@ -261,7 +265,7 @@ export const updateMyProfile = asyncHandler(async (req, res, next) => {
     }
   });
 
-  const staff = await staffService.updateStaffByUserId(req.user._id, filteredBody);
+  const staff = await staffService.updateByUserId(req.user._id, filteredBody);
   
   if (!staff) {
     return next(new AppError('Staff profile not found', 404));

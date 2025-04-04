@@ -4,6 +4,7 @@ import { Doctor, TimeSlot, User, AuditLog } from '../models/index.mjs';
 import mongoose from 'mongoose';
 import { google } from 'googleapis';
 import config from '../config/config.mjs';
+import { AppError } from '../utils/errorHandler.mjs';
 
 /**
  * Service for managing doctor availability and time slots
@@ -14,7 +15,7 @@ class AvailabilityService {
    * @param {string} doctorId - Doctor ID
    * @param {Date} startDate - Start date
    * @param {Date} endDate - End date
-   * @returns {Array} Available time slots
+   * @returns {Array} All time slots
    */
   async getTimeSlots(doctorId, startDate, endDate) {
     try {
@@ -63,6 +64,20 @@ class AvailabilityService {
     } catch (error) {
       console.error('Get available time slots error:', error);
       throw new Error('Failed to retrieve available time slots');
+    }
+  }
+
+  /**
+   * Get a specific time slot by ID
+   * @param {string} slotId - Time slot ID
+   * @returns {Object} Time slot
+   */
+  async getTimeSlotById(slotId) {
+    try {
+      return await TimeSlot.findById(slotId);
+    } catch (error) {
+      console.error('Get time slot by ID error:', error);
+      throw new Error('Failed to retrieve time slot');
     }
   }
 
@@ -381,7 +396,6 @@ class AvailabilityService {
    * @param {string} endTime - End time (HH:MM)
    * @param {string} excludeSlotId - Slot ID to exclude (for updates)
    * @returns {Object|null} Overlapping time slot if found, null otherwise
-   * @private
    */
   async checkOverlappingTimeSlots(doctorId, date, startTime, endTime, excludeSlotId = null) {
     // Convert date to a Date object if it's not already
@@ -867,7 +881,7 @@ class AvailabilityService {
             // Update slot with Google Calendar event ID
             await TimeSlot.findByIdAndUpdate(slot._id, {
               googleEventId: event.data.id
-            });
+            }, { session });
             
             syncResults.created++;
             syncResults.details.push({
@@ -922,18 +936,18 @@ class AvailabilityService {
           
           if (isAvailabilityEvent) {
             // Create a new time slot in the database
-            const newSlot = await TimeSlot.create({
+            const newSlot = await TimeSlot.create([{
               doctorId,
               date: new Date(eventStart.setHours(0, 0, 0, 0)),
               startTime,
               endTime,
               status: 'available',
               googleEventId: event.id
-            });
+            }], { session });
             
             syncResults.created++;
             syncResults.details.push({
-              slotId: newSlot._id,
+              slotId: newSlot[0]._id,
               status: 'imported',
               eventId: event.id
             });
@@ -969,26 +983,30 @@ class AvailabilityService {
       // Commit the transaction
       await session.commitTransaction();
       
-      return syncResults; } catch (error) {
-        // Abort transaction on error
-        await session.abortTransaction();
-        console.error('Sync with Google Calendar error:', error);
-        throw new Error(`Failed to sync with Google Calendar: ${error.message}`);
-      } finally {
-        session.endSession();
-      }
-    }
-  
-    /**
-     * Convert time string (HH:MM) to minutes since midnight
-     * @param {string} timeString - Time string in HH:MM format
-     * @returns {number} Minutes since midnight
-     * @private
-     */
-    _timeToMinutes(timeString) {
-      const [hours, minutes] = timeString.split(':').map(Number);
-      return hours * 60 + minutes;
+      return syncResults;
+    } catch (error) {
+      // Abort transaction on error
+      await session.abortTransaction();
+      console.error('Sync with Google Calendar error:', error);
+      throw new Error(`Failed to sync with Google Calendar: ${error.message}`);
+    } finally {
+      session.endSession();
     }
   }
-  
-  export default AvailabilityService;
+
+  /**
+   * Convert time string (HH:MM) to minutes since midnight
+   * @param {string} timeString - Time string in HH:MM format
+   * @returns {number} Minutes since midnight
+   * @private
+   */
+  _timeToMinutes(timeString) {
+    const [hours, minutes] = timeString.split(':').map(Number);
+    return hours * 60 + minutes;
+  }
+}
+
+// Create a singleton instance
+const availabilityService = new AvailabilityService();
+
+export default availabilityService;
