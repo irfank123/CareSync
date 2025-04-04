@@ -8,6 +8,7 @@ import * as patientController from './patientController.mjs';
 import * as doctorController from './doctorController.mjs';
 import * as staffController from './staffController.mjs';
 import * as availabilityController from './availabilityController.mjs';
+import * as appointmentController from './appointmentController.mjs';
 
 export {
   authController,
@@ -17,5 +18,6 @@ export {
   patientController,
   doctorController,
   staffController,
-  availabilityController
+  availabilityController,
+  appointmentController
 };
