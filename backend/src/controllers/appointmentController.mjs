@@ -2,7 +2,7 @@
 
 import { validationResult } from 'express-validator';
 import { check } from 'express-validator';
-import appointmentService from '../services/appointmentService.mjs';
+import { withServices, withServicesForController } from '../utils/controllerHelper.mjs';
 import { asyncHandler, AppError, formatValidationErrors } from '../utils/errorHandler.mjs';
 
 /**
@@ -10,7 +10,7 @@ import { asyncHandler, AppError, formatValidationErrors } from '../utils/errorHa
  * @route   GET /api/appointments
  * @access  Private (Admin, Doctor, Staff)
  */
-export const getAppointments = asyncHandler(async (req, res, next) => {
+const getAppointments = async (req, res, next, { appointmentService }) => {
   // Extract query parameters for filtering and pagination
   const {
     page,
@@ -69,14 +69,14 @@ export const getAppointments = asyncHandler(async (req, res, next) => {
     currentPage: result.currentPage,
     data: result.appointments
   });
-});
+};
 
 /**
  * @desc    Get single appointment
  * @route   GET /api/appointments/:id
  * @access  Private (Admin, Doctor, Staff, or Involved Patient)
  */
-export const getAppointment = asyncHandler(async (req, res, next) => {
+const getAppointment = async (req, res, next, { appointmentService }) => {
   const appointmentId = req.params.id;
   
   const appointment = await appointmentService.getAppointmentById(appointmentId);
@@ -100,14 +100,14 @@ export const getAppointment = asyncHandler(async (req, res, next) => {
     success: true,
     data: appointment
   });
-});
+};
 
 /**
  * @desc    Create new appointment
  * @route   POST /api/appointments
  * @access  Private (Admin, Staff, or Patient)
  */
-export const createAppointment = asyncHandler(async (req, res, next) => {
+const createAppointment = async (req, res, next, { appointmentService, patientService }) => {
   // Check for validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -117,7 +117,7 @@ export const createAppointment = asyncHandler(async (req, res, next) => {
   // If the user is a patient creating their own appointment,
   // make sure patientId matches their own record
   if (req.userRole === 'patient') {
-    const patientRecord = await getPatientForUser(req.user._id);
+    const patientRecord = await patientService.getByUserId(req.user._id);
     if (!patientRecord) {
       return next(new AppError('Patient record not found', 404));
     }
@@ -136,14 +136,14 @@ export const createAppointment = asyncHandler(async (req, res, next) => {
     success: true,
     data: appointment
   });
-});
+};
 
 /**
  * @desc    Update appointment
  * @route   PUT /api/appointments/:id
  * @access  Private (Admin, Staff, Doctor involved, or Patient involved)
  */
-export const updateAppointment = asyncHandler(async (req, res, next) => {
+const updateAppointment = async (req, res, next, { appointmentService, patientService }) => {
   // Check for validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -202,14 +202,14 @@ export const updateAppointment = asyncHandler(async (req, res, next) => {
     success: true,
     data: updatedAppointment
   });
-});
+};
 
 /**
  * @desc    Delete appointment
  * @route   DELETE /api/appointments/:id
  * @access  Private (Admin only)
  */
-export const deleteAppointment = asyncHandler(async (req, res, next) => {
+const deleteAppointment = async (req, res, next, { appointmentService }) => {
   // Only admins can delete appointments
   if (req.userRole !== 'admin') {
     return next(new AppError('Only administrators can delete appointments', 403));
@@ -230,19 +230,19 @@ export const deleteAppointment = asyncHandler(async (req, res, next) => {
     success: true,
     message: 'Appointment deleted successfully'
   });
-});
+};
 
 /**
  * @desc    Get patient's appointments
  * @route   GET /api/appointments/patient/:patientId
  * @access  Private (Admin, Doctor, Staff, or Patient themselves)
  */
-export const getPatientAppointments = asyncHandler(async (req, res, next) => {
+const getPatientAppointments = async (req, res, next, { appointmentService, patientService }) => {
   const patientId = req.params.patientId;
   
   // If patient is accessing, verify it's their own record
   if (req.userRole === 'patient') {
-    const patientRecord = await getPatientForUser(req.user._id);
+    const patientRecord = await patientService.getByUserId(req.user._id);
     
     if (!patientRecord || patientRecord._id.toString() !== patientId) {
       return next(new AppError('You can only view your own appointments', 403));
@@ -279,19 +279,19 @@ export const getPatientAppointments = asyncHandler(async (req, res, next) => {
     currentPage: result.currentPage,
     data: result.appointments
   });
-});
+};
 
 /**
  * @desc    Get doctor's appointments
  * @route   GET /api/appointments/doctor/:doctorId
  * @access  Private (Admin, Staff, or Doctor themselves)
  */
-export const getDoctorAppointments = asyncHandler(async (req, res, next) => {
+const getDoctorAppointments = async (req, res, next, { appointmentService, doctorService }) => {
   const doctorId = req.params.doctorId;
   
   // If doctor is accessing, verify it's their own record
   if (req.userRole === 'doctor') {
-    const doctorRecord = await getDoctorForUser(req.user._id);
+    const doctorRecord = await doctorService.getByUserId(req.user._id);
     
     if (!doctorRecord || doctorRecord._id.toString() !== doctorId) {
       return next(new AppError('You can only view your own appointments', 403));
@@ -328,18 +328,18 @@ export const getDoctorAppointments = asyncHandler(async (req, res, next) => {
     currentPage: result.currentPage,
     data: result.appointments
   });
-});
+};
 
 /**
  * @desc    Get upcoming appointments for current user
  * @route   GET /api/appointments/upcoming
  * @access  Private
  */
-export const getUpcomingAppointments = asyncHandler(async (req, res, next) => {
+const getUpcomingAppointments = async (req, res, next, { appointmentService, patientService, doctorService }) => {
   let appointments = [];
   
   if (req.userRole === 'patient') {
-    const patientRecord = await getPatientForUser(req.user._id);
+    const patientRecord = await patientService.getByUserId(req.user._id);
     
     if (!patientRecord) {
       return next(new AppError('Patient record not found', 404));
@@ -347,7 +347,7 @@ export const getUpcomingAppointments = asyncHandler(async (req, res, next) => {
     
     appointments = await appointmentService.getPatientUpcomingAppointments(patientRecord._id);
   } else if (req.userRole === 'doctor') {
-    const doctorRecord = await getDoctorForUser(req.user._id);
+    const doctorRecord = await doctorService.getByUserId(req.user._id);
     
     if (!doctorRecord) {
       return next(new AppError('Doctor record not found', 404));
@@ -368,7 +368,7 @@ export const getUpcomingAppointments = asyncHandler(async (req, res, next) => {
     count: appointments.length,
     data: appointments
   });
-});
+};
 
 /**
  * Helper function to get patient record for a user
@@ -435,8 +435,35 @@ const checkAppointmentPermission = async (appointment, userId, userRole) => {
   }
 };
 
+// Define the dependencies for each controller method
+const dependencies = {
+  getAppointments: ['appointmentService'],
+  getAppointment: ['appointmentService'],
+  createAppointment: ['appointmentService', 'patientService'],
+  updateAppointment: ['appointmentService', 'patientService'],
+  deleteAppointment: ['appointmentService'],
+  getPatientAppointments: ['appointmentService', 'patientService'],
+  getDoctorAppointments: ['appointmentService', 'doctorService'],
+  getUpcomingAppointments: ['appointmentService', 'patientService', 'doctorService']
+};
+
+// Create the controller object with all methods
+const appointmentController = {
+  getAppointments,
+  getAppointment,
+  createAppointment,
+  updateAppointment,
+  deleteAppointment,
+  getPatientAppointments,
+  getDoctorAppointments,
+  getUpcomingAppointments
+};
+
+// Apply DI to the controller
+const enhancedController = withServicesForController(appointmentController, dependencies);
+
 // Validation middleware
-export const createAppointmentValidation = [
+const createAppointmentValidation = [
   check('patientId', 'Patient ID is required').not().isEmpty(),
   check('doctorId', 'Doctor ID is required').not().isEmpty(),
   check('timeSlotId', 'Time slot ID is required').not().isEmpty(),
@@ -447,7 +474,7 @@ export const createAppointmentValidation = [
   check('isVirtual', 'isVirtual must be a boolean').optional().isBoolean()
 ];
 
-export const updateAppointmentValidation = [
+const updateAppointmentValidation = [
   check('status', 'Status must be one of: scheduled, checked-in, in-progress, completed, cancelled, no-show')
     .optional()
     .isIn(['scheduled', 'checked-in', 'in-progress', 'completed', 'cancelled', 'no-show']),
@@ -464,16 +491,34 @@ export const updateAppointmentValidation = [
     .isEmpty()
 ];
 
-// Export all functions
+// Export the enhanced controller methods
+export const {
+  getAppointments: getAppointmentsWithDI,
+  getAppointment: getAppointmentWithDI,
+  createAppointment: createAppointmentWithDI,
+  updateAppointment: updateAppointmentWithDI,
+  deleteAppointment: deleteAppointmentWithDI,
+  getPatientAppointments: getPatientAppointmentsWithDI,
+  getDoctorAppointments: getDoctorAppointmentsWithDI,
+  getUpcomingAppointments: getUpcomingAppointmentsWithDI
+} = enhancedController;
+
+// Export the validation middleware
+export {
+  createAppointmentValidation,
+  updateAppointmentValidation
+};
+
+// Default export for compatibility
 export default {
-  getAppointments,
-  getAppointment,
-  createAppointment,
-  updateAppointment,
-  deleteAppointment,
-  getPatientAppointments,
-  getDoctorAppointments,
-  getUpcomingAppointments,
+  getAppointments: getAppointmentsWithDI,
+  getAppointment: getAppointmentWithDI,
+  createAppointment: createAppointmentWithDI,
+  updateAppointment: updateAppointmentWithDI,
+  deleteAppointment: deleteAppointmentWithDI,
+  getPatientAppointments: getPatientAppointmentsWithDI,
+  getDoctorAppointments: getDoctorAppointmentsWithDI,
+  getUpcomingAppointments: getUpcomingAppointmentsWithDI,
   createAppointmentValidation,
   updateAppointmentValidation
 };

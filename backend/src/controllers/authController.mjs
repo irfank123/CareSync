@@ -1,11 +1,11 @@
 // src/controllers/authController.mjs
 
-import { validationResult } from 'express-validator';
-import authService from '../services/authService.mjs';
-import { asyncHandler, AppError, formatValidationErrors } from '../utils/errorHandler.mjs';
-import config from '../config/config.mjs';
 import jwt from 'jsonwebtoken';
-import tokenBlacklistService from '../services/tokenBlacklistService.mjs';
+import { validationResult } from 'express-validator';
+import { check } from 'express-validator';
+import { withServices, withServicesForController } from '../utils/controllerHelper.mjs';
+import { AppError, formatValidationErrors } from '../utils/errorHandler.mjs';
+import config from '../config/config.mjs';
 import { AuditLog } from '../models/index.mjs';
 
 /**
@@ -13,7 +13,7 @@ import { AuditLog } from '../models/index.mjs';
  * @route   POST /api/auth/register
  * @access  Public
  */
-export const register = asyncHandler(async (req, res, next) => {
+const register = async (req, res, next, { authService }) => {
   // Check for validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -27,14 +27,14 @@ export const register = asyncHandler(async (req, res, next) => {
 
   // Send response with cookie
   sendTokenResponse(user, 201, res, token);
-});
+};
 
 /**
  * @desc    Login user
  * @route   POST /api/auth/login
  * @access  Public
  */
-export const login = asyncHandler(async (req, res, next) => {
+const login = async (req, res, next, { authService }) => {
   // Check for validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -56,14 +56,14 @@ export const login = asyncHandler(async (req, res, next) => {
   
   // Send response with cookie
   sendTokenResponse(result.user, 200, res, result.token, result.roleData);
-});
+};
 
 /**
  * @desc    Verify MFA code
  * @route   POST /api/auth/verify-mfa
  * @access  Public
  */
-export const verifyMfa = asyncHandler(async (req, res, next) => {
+const verifyMfa = async (req, res, next, { authService }) => {
   // Check for validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -76,14 +76,14 @@ export const verifyMfa = asyncHandler(async (req, res, next) => {
   
   // Send response with cookie
   sendTokenResponse(result.user, 200, res, result.token, result.roleData);
-});
+};
 
 /**
  * @desc    Handle Auth0 callback
  * @route   POST /api/auth/auth0/callback
  * @access  Public
  */
-export const auth0Callback = asyncHandler(async (req, res, next) => {
+const auth0Callback = async (req, res, next, { authService }) => {
   const { userType } = req.body;
   
   if (userType !== 'patient' && userType !== 'doctor') {
@@ -97,19 +97,14 @@ export const auth0Callback = asyncHandler(async (req, res, next) => {
   
   // Send response with cookie
   sendTokenResponse(user, 200, res, token);
-});
+};
 
 /**
  * @desc    Logout user
  * @route   POST /api/auth/logout
  * @access  Private
  */
-/**
- * @desc    Logout user and clear cookie
- * @route   POST /api/auth/logout
- * @access  Private
- */
-export const logout = asyncHandler(async (req, res, next) => {
+const logout = async (req, res, next, { tokenBlacklistService }) => {
   try {
     // Get token from cookies or authorization header
     const token = req.cookies.token || 
@@ -163,14 +158,14 @@ export const logout = asyncHandler(async (req, res, next) => {
       message: 'Logged out successfully'
     });
   }
-});
+};
 
 /**
  * @desc    Get current user profile
  * @route   GET /api/auth/me
  * @access  Private
  */
-export const getMe = asyncHandler(async (req, res, next) => {
+const getMe = async (req, res, next, { authService }) => {
   const { user, roleData } = await authService.getUserProfile(req.user._id);
   
   res.status(200).json({
@@ -179,14 +174,14 @@ export const getMe = asyncHandler(async (req, res, next) => {
     roleData,
     role: user.role
   });
-});
+};
 
 /**
  * @desc    Forgot password
  * @route   POST /api/auth/forgot-password
  * @access  Public
  */
-export const forgotPassword = asyncHandler(async (req, res, next) => {
+const forgotPassword = async (req, res, next, { authService }) => {
   // Check for validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -201,14 +196,14 @@ export const forgotPassword = asyncHandler(async (req, res, next) => {
     success: true,
     message: 'If an account with that email exists, a password reset link has been sent'
   });
-});
+};
 
 /**
  * @desc    Reset password
  * @route   PUT /api/auth/reset-password/:resetToken
  * @access  Public
  */
-export const resetPassword = asyncHandler(async (req, res, next) => {
+const resetPassword = async (req, res, next, { authService }) => {
   // Check for validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -222,14 +217,14 @@ export const resetPassword = asyncHandler(async (req, res, next) => {
   
   // Send response with cookie
   sendTokenResponse(user, 200, res, token);
-});
+};
 
 /**
  * @desc    Update password for logged in user
  * @route   POST /api/auth/update-password
  * @access  Private
  */
-export const updatePassword = asyncHandler(async (req, res, next) => {
+const updatePassword = async (req, res, next, { authService }) => {
   // Check for validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -244,14 +239,14 @@ export const updatePassword = asyncHandler(async (req, res, next) => {
     success: true,
     message: 'Password updated successfully'
   });
-});
+};
 
 /**
  * @desc    Toggle MFA
  * @route   POST /api/auth/toggle-mfa
  * @access  Private
  */
-export const toggleMfa = asyncHandler(async (req, res, next) => {
+const toggleMfa = async (req, res, next, { authService }) => {
   // Check for validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -267,14 +262,14 @@ export const toggleMfa = asyncHandler(async (req, res, next) => {
     message: enable ? 'MFA enabled successfully' : 'MFA disabled successfully',
     user
   });
-});
+};
 
 /**
  * @desc    Refresh token
  * @route   POST /api/auth/refresh-token
  * @access  Private
  */
-export const refreshToken = asyncHandler(async (req, res, next) => {
+const refreshToken = async (req, res, next, { authService }) => {
   let options = {};
   
   if (req.user.clinicId) {
@@ -290,14 +285,14 @@ export const refreshToken = asyncHandler(async (req, res, next) => {
     success: true,
     token
   });
-});
+};
 
 /**
  * @desc    Verify email
  * @route   POST /api/auth/verify-email
  * @access  Public
  */
-export const verifyEmail = asyncHandler(async (req, res, next) => {
+const verifyEmail = async (req, res, next, { authService }) => {
   // Check for validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -312,7 +307,7 @@ export const verifyEmail = asyncHandler(async (req, res, next) => {
     success: true,
     message: 'Email verified successfully'
   });
-});
+};
 
 /**
  * Helper function to send token response with cookie
@@ -352,10 +347,43 @@ const sendCookieToken = (token, statusCode, res) => {
   res.cookie('token', token, cookieOptions);
 };
 
-// Export validation rules
-import { check } from 'express-validator';
+// Controller methods object
+const authController = {
+  register,
+  login,
+  verifyMfa,
+  auth0Callback,
+  logout,
+  getMe,
+  forgotPassword,
+  resetPassword,
+  updatePassword,
+  toggleMfa,
+  refreshToken,
+  verifyEmail
+};
 
-export const registerValidation = [
+// Service dependencies for each method
+const dependencies = {
+  register: ['authService'],
+  login: ['authService'],
+  verifyMfa: ['authService'],
+  auth0Callback: ['authService'],
+  logout: ['tokenBlacklistService'],
+  getMe: ['authService'],
+  forgotPassword: ['authService'],
+  resetPassword: ['authService'],
+  updatePassword: ['authService'],
+  toggleMfa: ['authService'],
+  refreshToken: ['authService'],
+  verifyEmail: ['authService']
+};
+
+// Apply DI to the controller
+const enhancedController = withServicesForController(authController, dependencies);
+
+// Validation rules
+const registerValidation = [
   check('firstName', 'First name is required').not().isEmpty().trim(),
   check('lastName', 'Last name is required').not().isEmpty().trim(),
   check('email', 'Please include a valid email').isEmail().normalizeEmail(),
@@ -374,21 +402,21 @@ export const registerValidation = [
   check('phoneNumber', 'Valid phone number is required').not().isEmpty().isMobilePhone()
 ];
 
-export const loginValidation = [
+const loginValidation = [
   check('email', 'Please include a valid email').isEmail().normalizeEmail(),
   check('password', 'Password is required').notEmpty()
 ];
 
-export const mfaValidation = [
+const mfaValidation = [
   check('email', 'Please include a valid email').isEmail().normalizeEmail(),
   check('mfaCode', 'Please provide a valid 6-digit code').isLength({ min: 6, max: 6 }).isNumeric()
 ];
 
-export const forgotPasswordValidation = [
+const forgotPasswordValidation = [
   check('email', 'Please include a valid email').isEmail().normalizeEmail(),
 ];
 
-export const resetPasswordValidation = [
+const resetPasswordValidation = [
   check('password')
     .isLength({ min: 8 })
     .withMessage('Password must be at least 8 characters')
@@ -402,7 +430,7 @@ export const resetPasswordValidation = [
     .withMessage('Password must contain a special character')
 ];
 
-export const updatePasswordValidation = [
+const updatePasswordValidation = [
   check('currentPassword', 'Current password is required').notEmpty(),
   check('newPassword')
     .isLength({ min: 8 })
@@ -417,12 +445,64 @@ export const updatePasswordValidation = [
     .withMessage('New password must contain a special character')
 ];
 
-export const toggleMfaValidation = [
+const toggleMfaValidation = [
   check('enable', 'Enable flag must be a boolean').isBoolean(),
   check('method', 'Method must be app or sms').optional().isIn(['app', 'sms'])
 ];
 
-export const verifyEmailValidation = [
+const verifyEmailValidation = [
   check('email', 'Please include a valid email').isEmail().normalizeEmail(),
   check('code', 'Please provide a valid verification code').isLength({ min: 6, max: 6 }).isNumeric()
 ];
+
+// Export all methods with DI
+export const {
+  register: registerWithDI,
+  login: loginWithDI,
+  verifyMfa: verifyMfaWithDI,
+  auth0Callback: auth0CallbackWithDI,
+  logout: logoutWithDI,
+  getMe: getMeWithDI,
+  forgotPassword: forgotPasswordWithDI,
+  resetPassword: resetPasswordWithDI,
+  updatePassword: updatePasswordWithDI,
+  toggleMfa: toggleMfaWithDI,
+  refreshToken: refreshTokenWithDI,
+  verifyEmail: verifyEmailWithDI
+} = enhancedController;
+
+// Export validation rules
+export {
+  registerValidation,
+  loginValidation,
+  mfaValidation,
+  forgotPasswordValidation,
+  resetPasswordValidation,
+  updatePasswordValidation,
+  toggleMfaValidation,
+  verifyEmailValidation
+};
+
+// Default export for compatibility
+export default {
+  register: registerWithDI,
+  login: loginWithDI,
+  verifyMfa: verifyMfaWithDI,
+  auth0Callback: auth0CallbackWithDI,
+  logout: logoutWithDI,
+  getMe: getMeWithDI,
+  forgotPassword: forgotPasswordWithDI,
+  resetPassword: resetPasswordWithDI,
+  updatePassword: updatePasswordWithDI,
+  toggleMfa: toggleMfaWithDI,
+  refreshToken: refreshTokenWithDI,
+  verifyEmail: verifyEmailWithDI,
+  registerValidation,
+  loginValidation,
+  mfaValidation,
+  forgotPasswordValidation,
+  resetPasswordValidation,
+  updatePasswordValidation,
+  toggleMfaValidation,
+  verifyEmailValidation
+};

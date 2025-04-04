@@ -1,18 +1,8 @@
 // src/server.mjs
 
-import express from 'express';
 import mongoose from 'mongoose';
-import cors from 'cors';
-import helmet from 'helmet';
-import morgan from 'morgan';
-import cookieParser from 'cookie-parser';
-import mongoSanitize from 'express-mongo-sanitize';
-import xss from 'xss-clean';
-import hpp from 'hpp';
-import { v4 as uuidv4 } from 'uuid';
 import config from './config/config.mjs';
-import setupRoutes from './routes/index.mjs';
-import { errorMiddleware } from './middleware/index.mjs';
+import { bootstrap } from './app.mjs';
 
 /**
  * Connect to MongoDB with retry logic
@@ -49,58 +39,6 @@ const connectDB = async (retries = 5, delay = 5000) => {
   
   console.error(`Failed to connect to MongoDB after ${retries} attempts`);
   throw lastError;
-};
-
-/**
- * Create and configure Express application
- * @returns {Object} Express app
- */
-const createApp = () => {
-  const app = express();
-  
-  // Assign unique ID to each request for tracking
-  app.use((req, res, next) => {
-    req.id = uuidv4();
-    next();
-  });
-  
-  // Set security headers
-  app.use(helmet());
-  
-  // Sanitize inputs against XSS and MongoDB injection
-  app.use(xss());
-  app.use(mongoSanitize());
-  
-  // Prevent HTTP parameter pollution
-  app.use(hpp());
-  
-  // Parse cookies
-  app.use(cookieParser());
-  
-  // Body parser middleware
-  app.use(express.json({ limit: '1mb' }));
-  app.use(express.urlencoded({ extended: false, limit: '1mb' }));
-  
-  // Handle too large payloads
-  app.use(errorMiddleware.payloadTooLarge);
-  
-  // CORS middleware
-  app.use(cors(config.cors));
-  
-  // Logging middleware
-  if (config.env === 'development') {
-    app.use(morgan('dev'));
-  } else {
-    app.use(morgan('combined'));
-  }
-  
-  // Add timestamp to all requests for logging
-  app.use((req, res, next) => {
-    req.requestTime = new Date().toISOString();
-    next();
-  });
-  
-  return app;
 };
 
 /**
@@ -189,11 +127,8 @@ const startApp = async () => {
     // Connect to database
     await connectDB();
     
-    // Create Express app
-    const app = createApp();
-    
-    // Setup routes
-    setupRoutes(app);
+    // Bootstrap the application
+    const app = await bootstrap();
     
     // Start server
     const server = startServer(app);

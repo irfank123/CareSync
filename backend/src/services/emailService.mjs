@@ -1,4 +1,3 @@
-
 // src/services/emailService.mjs
 
 import config from '../config/config.mjs';
@@ -19,6 +18,8 @@ import {
 class EmailService {
   constructor() {
     this.from = config.email.from;
+    this.initialized = false;
+    this.emailQueue = [];
     
     // Create transporter based on environment
     if (process.env.NODE_ENV === 'production') {
@@ -32,12 +33,154 @@ class EmailService {
           pass: config.email.auth.pass
         }
       });
+      this.initialized = true;
     } else {
-      // In development, set up a default transporter
-      // We'll initialize it properly when needed
+      // In development, we'll set up the transporter later
       this.transporter = null;
-      // Initialize asynchronously
-      this.initDevTransport();
+    }
+  }
+  
+  /**
+   * Set up development email transport (Ethereal)
+   * This creates a test account with Ethereal for preview
+   */
+  async setupDevTransport() {
+    if (this.transporter) {
+      return this.transporter; // Already initialized
+    }
+    
+    try {
+      // Generate test SMTP service account from ethereal.email
+      const testAccount = await nodemailer.createTestAccount();
+      
+      // Create a reusable transporter object using the default SMTP transport
+      this.transporter = nodemailer.createTransport({
+        host: 'smtp.ethereal.email',
+        port: 587,
+        secure: false,
+        auth: {
+          user: testAccount.user,
+          pass: testAccount.pass
+        }
+      });
+      
+      console.log('Development email setup complete');
+      console.log('Test Email Account:', testAccount.user);
+      
+      this.initialized = true;
+      
+      // Process any queued emails
+      await this._processQueue();
+      
+      return this.transporter;
+    } catch (error) {
+      console.error('Failed to set up dev email transport:', error);
+      // Set up a dummy transport that logs emails
+      this.transporter = {
+        sendMail: (options) => {
+          console.log('Email would be sent:', options);
+          return Promise.resolve({ messageId: 'dev-mode-no-email-sent' });
+        }
+      };
+      this.initialized = true;
+      
+      // Process any queued emails
+      await this._processQueue();
+      
+      return this.transporter;
+    }
+  }
+  
+  /**
+   * Process any emails in the queue
+   * @private
+   */
+  async _processQueue() {
+    if (!this.initialized || this.emailQueue.length === 0) {
+      return;
+    }
+    
+    console.log(`Processing ${this.emailQueue.length} queued emails`);
+    
+    // Process all emails in the queue
+    const queue = [...this.emailQueue];
+    this.emailQueue = [];
+    
+    for (const { options, resolve, reject } of queue) {
+      try {
+        const result = await this._sendEmailImmediate(options);
+        resolve(result);
+      } catch (error) {
+        reject(error);
+      }
+    }
+  }
+  
+  /**
+   * Send an email (will queue if not initialized)
+   * @param {Object} options - Email options
+   * @returns {Promise<Object>} Send result
+   */
+  async sendEmail(options) {
+    // If not initialized, queue the email
+    if (!this.initialized) {
+      return new Promise((resolve, reject) => {
+        this.emailQueue.push({ options, resolve, reject });
+        console.log('Email queued until service is initialized');
+      });
+    }
+    
+    // Otherwise send immediately
+    return this._sendEmailImmediate(options);
+  }
+  
+  /**
+   * Send an email immediately (internal method)
+   * @param {Object} options - Email options
+   * @returns {Promise<Object>} Send result
+   * @private
+   */
+  async _sendEmailImmediate(options) {
+    try {
+      const mailOptions = {
+        from: `"${config.appName}" <${this.from}>`,
+        to: options.to,
+        subject: options.subject,
+        text: options.text,
+        html: options.html
+      };
+      
+      // Add CC if specified
+      if (options.cc) {
+        mailOptions.cc = options.cc;
+      }
+      
+      // Add BCC if specified
+      if (options.bcc) {
+        mailOptions.bcc = options.bcc;
+      }
+      
+      // Add attachments if specified
+      if (options.attachments && Array.isArray(options.attachments)) {
+        mailOptions.attachments = options.attachments;
+      }
+      
+      // Send email
+      const info = await this.transporter.sendMail(mailOptions);
+      
+      // Log email preview URL in development
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Email preview URL:', nodemailer.getTestMessageUrl(info));
+      }
+      
+      return {
+        success: true,
+        messageId: info.messageId,
+        info
+      };
+    } catch (error) {
+      console.error('Email sending failed:', error);
+      throw new Error(`Failed to send email: ${error.message}`);
     }
   }
   
@@ -163,78 +306,6 @@ class EmailService {
   }
   
   /**
-   * Set up development email transport
-   * This creates a test account with Ethereal for preview
-   */
-  async setupDevTransport() {
-    // Generate test SMTP service account from ethereal.email
-    const testAccount = await nodemailer.createTestAccount();
-    
-    // Create a reusable transporter object using the default SMTP transport
-    this.transporter = nodemailer.createTransport({
-      host: 'smtp.ethereal.email',
-      port: 587,
-      secure: false,
-      auth: {
-        user: testAccount.user,
-        pass: testAccount.pass
-      }
-    });
-    
-    console.log('Development email setup complete');
-    console.log('Test Email Account:', testAccount.user);
-  }
-  
-  /**
-   * Send an email
-   * @param {Object} options - Email options
-   * @returns {Promise<Object>} Send result
-   */
-  async sendEmail(options) {
-    try {
-      const mailOptions = {
-        from: `"${config.appName}" <${this.from}>`,
-        to: options.to,
-        subject: options.subject,
-        text: options.text,
-        html: options.html
-      };
-      
-      // Add CC if specified
-      if (options.cc) {
-        mailOptions.cc = options.cc;
-      }
-      
-      // Add BCC if specified
-      if (options.bcc) {
-        mailOptions.bcc = options.bcc;
-      }
-      
-      // Add attachments if specified
-      if (options.attachments && Array.isArray(options.attachments)) {
-        mailOptions.attachments = options.attachments;
-      }
-      
-      // Send email
-      const info = await this.transporter.sendMail(mailOptions);
-      
-      // Log email preview URL in development
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('Email preview URL:', nodemailer.getTestMessageUrl(info));
-      }
-      
-      return {
-        success: true,
-        messageId: info.messageId,
-        info
-      };
-    } catch (error) {
-      console.error('Email sending failed:', error);
-      throw new Error(`Failed to send email: ${error.message}`);
-    }
-  }
-  
-  /**
    * Send welcome email
    * @param {string} email - Recipient email
    * @param {string} firstName - Recipient first name
@@ -280,8 +351,6 @@ class EmailService {
    */
   async sendAppointmentReminder(appointment, patient, doctor) {
     // Generate email content from template
-    const { appointmentReminderTemplate } = await import('../emailTemplates/index.mjs');
-    
     const { html, text } = appointmentReminderTemplate({
       appName: config.appName,
       appointment,
@@ -297,33 +366,7 @@ class EmailService {
       text
     });
   }
-    
-  //method to handle async initialization
-  async initDevTransport() {
-    try {
-      const testAccount = await nodemailer.createTestAccount();
-      
-      this.transporter = nodemailer.createTransport({
-        host: 'smtp.ethereal.email',
-        port: 587,
-        secure: false,
-        auth: {
-          user: testAccount.user,
-          pass: testAccount.pass
-        }
-      });
-      
-      console.log('Development email setup complete');
-      console.log('Test Email Account:', testAccount.user);
-    } catch (error) {
-      console.error('Failed to set up dev email transport:', error);
-      // Set up a dummy transport that logs emails
-      this.transporter = {
-        sendMail: (options) => {
-          console.log('Email would be sent:', options);
-          return Promise.resolve({ messageId: 'dev-mode-no-email-sent' });
-        }
-      };
-    }
-  } 
 }
+
+// Export a single instance
+export default new EmailService();

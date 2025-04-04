@@ -393,122 +393,44 @@ class AppointmentService {
     }
   }
   
-  /**
-   * Create new appointment
-   * @param {Object} appointmentData - Appointment data
-   * @param {string} userId - User creating the appointment
-   * @returns {Object} Created appointment
-   */
-  async createAppointment(appointmentData, userId) {
+/**
+ * Create new appointment - refactored into smaller functions
+ * @param {Object} appointmentData - Appointment data
+ * @param {string} userId - User creating the appointment
+ * @returns {Object} Created appointment
+ */
+async createAppointment(appointmentData, userId) {
     const session = await mongoose.startSession();
     session.startTransaction();
     
     try {
-      // Check if patient exists
-      if (!appointmentData.patientId || !mongoose.Types.ObjectId.isValid(appointmentData.patientId)) {
-        throw new Error('Valid patient ID is required');
-      }
-      
-      const patient = await Patient.findById(appointmentData.patientId);
-      if (!patient) {
-        throw new Error('Patient not found');
-      }
-      
-      // Check if doctor exists
-      if (!appointmentData.doctorId || !mongoose.Types.ObjectId.isValid(appointmentData.doctorId)) {
-        throw new Error('Valid doctor ID is required');
-      }
-      
-      const doctor = await Doctor.findById(appointmentData.doctorId);
-      if (!doctor) {
-        throw new Error('Doctor not found');
-      }
-      
-      // Check if time slot exists and is available
-      if (!appointmentData.timeSlotId || !mongoose.Types.ObjectId.isValid(appointmentData.timeSlotId)) {
-        throw new Error('Valid time slot ID is required');
-      }
-      
-      const timeSlot = await TimeSlot.findById(appointmentData.timeSlotId);
-      if (!timeSlot) {
-        throw new Error('Time slot not found');
-      }
-      
-      if (timeSlot.status !== 'available') {
-        throw new Error('Time slot is not available');
-      }
+      // Validate input data
+      await this._validateAppointmentInputData(appointmentData);
       
       // Create assessment if provided
-      let assessmentId = null;
-      if (appointmentData.assessment) {
-        const assessment = await Assessment.create([{
-          patientId: appointmentData.patientId,
-          appointmentId: null, // Will be updated after appointment creation
-          symptoms: appointmentData.assessment.symptoms || [],
-          responses: appointmentData.assessment.responses || [],
-          aiGeneratedReport: appointmentData.assessment.aiGeneratedReport,
-          severity: appointmentData.assessment.severity || 'low',
-          status: 'completed',
-          completionDate: new Date()
-        }], { session });
-        
-        assessmentId = assessment[0]._id;
-      }
+      const assessmentId = await this._createAssessmentIfProvided(appointmentData, session);
       
-      // Create appointment
-      const appointment = await Appointment.create([{
-        patientId: appointmentData.patientId,
-        doctorId: appointmentData.doctorId,
-        timeSlotId: appointmentData.timeSlotId,
-        date: timeSlot.date,
-        startTime: timeSlot.startTime,
-        endTime: timeSlot.endTime,
-        type: appointmentData.type || 'virtual',
-        status: 'scheduled',
-        notes: appointmentData.notes || '',
-        reasonForVisit: appointmentData.reasonForVisit,
-        preliminaryAssessmentId: assessmentId,
-        isVirtual: appointmentData.isVirtual !== false,
-        videoConferenceLink: appointmentData.isVirtual ? this._generateVideoLink() : null
-      }], { session });
-      
-      // Update assessment with appointment ID if needed
-      if (assessmentId) {
-        await Assessment.findByIdAndUpdate(
-          assessmentId,
-          { appointmentId: appointment[0]._id },
-          { session }
-        );
-      }
-      
-      // Update time slot to booked
-      await TimeSlot.findByIdAndUpdate(
-        appointmentData.timeSlotId,
-        { status: 'booked' },
-        { session }
+      // Create the appointment
+      const appointment = await this._createAppointmentRecord(
+        appointmentData, assessmentId, session
       );
       
+      // Update time slot status
+      await this._updateTimeSlotStatus(appointmentData.timeSlotId, 'booked', session);
+      
       // Create audit log
-      await AuditLog.create([{
-        userId: userId,
-        action: 'create',
-        resource: 'appointment',
-        resourceId: appointment[0]._id,
-        details: {
-          patientId: appointmentData.patientId,
-          doctorId: appointmentData.doctorId,
-          date: timeSlot.date,
-          type: appointmentData.type || 'virtual'
-        }
-      }], { session });
+      await this._createAppointmentAuditLog(
+        userId, appointment[0]._id, appointmentData, session
+      );
+      
+      // Get patient and doctor for notifications
+      const { patient, doctor } = await this._getParticipants(
+        appointmentData.patientId, appointmentData.doctorId
+      );
       
       // Send notifications
       await this._sendAppointmentNotifications(
-        appointment[0],
-        patient,
-        doctor,
-        'created',
-        session
+        appointment[0], patient, doctor, 'created', session
       );
       
       // Commit the transaction
@@ -524,6 +446,180 @@ class AppointmentService {
     } finally {
       session.endSession();
     }
+  }
+  
+  /**
+   * Validate the appointment input data
+   * @param {Object} appointmentData - Appointment data
+   * @private
+   */
+  async _validateAppointmentInputData(appointmentData) {
+    // Check required fields
+    if (!appointmentData.patientId || !mongoose.Types.ObjectId.isValid(appointmentData.patientId)) {
+      throw new Error('Valid patient ID is required');
+    }
+    
+    if (!appointmentData.doctorId || !mongoose.Types.ObjectId.isValid(appointmentData.doctorId)) {
+      throw new Error('Valid doctor ID is required');
+    }
+    
+    if (!appointmentData.timeSlotId || !mongoose.Types.ObjectId.isValid(appointmentData.timeSlotId)) {
+      throw new Error('Valid time slot ID is required');
+    }
+    
+    // Check if patient exists
+    const patient = await Patient.findById(appointmentData.patientId);
+    if (!patient) {
+      throw new Error('Patient not found');
+    }
+    
+    // Check if doctor exists
+    const doctor = await Doctor.findById(appointmentData.doctorId);
+    if (!doctor) {
+      throw new Error('Doctor not found');
+    }
+    
+    // Check if time slot exists and is available
+    const timeSlot = await TimeSlot.findById(appointmentData.timeSlotId);
+    if (!timeSlot) {
+      throw new Error('Time slot not found');
+    }
+    
+    if (timeSlot.status !== 'available') {
+      throw new Error('Time slot is not available');
+    }
+  }
+  
+  /**
+   * Create assessment record if provided in appointment data
+   * @param {Object} appointmentData - Appointment data
+   * @param {Object} session - MongoDB session
+   * @returns {string|null} Assessment ID or null
+   * @private
+   */
+  async _createAssessmentIfProvided(appointmentData, session) {
+    if (!appointmentData.assessment) {
+      return null;
+    }
+    
+    const assessment = await Assessment.create([{
+      patientId: appointmentData.patientId,
+      appointmentId: null, // Will be updated after appointment creation
+      symptoms: appointmentData.assessment.symptoms || [],
+      responses: appointmentData.assessment.responses || [],
+      aiGeneratedReport: appointmentData.assessment.aiGeneratedReport,
+      severity: appointmentData.assessment.severity || 'low',
+      status: 'completed',
+      completionDate: new Date()
+    }], { session });
+    
+    return assessment[0]._id;
+  }
+  
+  /**
+   * Create the appointment record
+   * @param {Object} appointmentData - Appointment data
+   * @param {string|null} assessmentId - Assessment ID if any
+   * @param {Object} session - MongoDB session
+   * @returns {Array} Created appointment document(s)
+   * @private
+   */
+  async _createAppointmentRecord(appointmentData, assessmentId, session) {
+    // Get time slot details
+    const timeSlot = await TimeSlot.findById(appointmentData.timeSlotId);
+    
+    // Create appointment
+    const appointment = await Appointment.create([{
+      patientId: appointmentData.patientId,
+      doctorId: appointmentData.doctorId,
+      timeSlotId: appointmentData.timeSlotId,
+      date: timeSlot.date,
+      startTime: timeSlot.startTime,
+      endTime: timeSlot.endTime,
+      type: appointmentData.type || 'virtual',
+      status: 'scheduled',
+      notes: appointmentData.notes || '',
+      reasonForVisit: appointmentData.reasonForVisit,
+      preliminaryAssessmentId: assessmentId,
+      isVirtual: appointmentData.isVirtual !== false,
+      videoConferenceLink: appointmentData.isVirtual ? this._generateVideoLink() : null
+    }], { session });
+    
+    // Update assessment with appointment ID if needed
+    if (assessmentId) {
+      await Assessment.findByIdAndUpdate(
+        assessmentId,
+        { appointmentId: appointment[0]._id },
+        { session }
+      );
+    }
+    
+    return appointment;
+  }
+  
+  /**
+   * Update time slot status
+   * @param {string} timeSlotId - Time slot ID
+   * @param {string} status - New status
+   * @param {Object} session - MongoDB session
+   * @private
+   */
+  async _updateTimeSlotStatus(timeSlotId, status, session) {
+    await TimeSlot.findByIdAndUpdate(
+      timeSlotId,
+      { status },
+      { session }
+    );
+  }
+  
+  /**
+   * Create audit log for appointment creation
+   * @param {string} userId - User ID 
+   * @param {string} appointmentId - Appointment ID
+   * @param {Object} appointmentData - Appointment data
+   * @param {Object} session - MongoDB session
+   * @private
+   */
+  async _createAppointmentAuditLog(userId, appointmentId, appointmentData, session) {
+    await AuditLog.create([{
+      userId: userId,
+      action: 'create',
+      resource: 'appointment',
+      resourceId: appointmentId,
+      details: {
+        patientId: appointmentData.patientId,
+        doctorId: appointmentData.doctorId,
+        timeSlotId: appointmentData.timeSlotId,
+        type: appointmentData.type || 'virtual'
+      }
+    }], { session });
+  }
+  
+  /**
+   * Get patient and doctor participants for an appointment
+   * @param {string} patientId - Patient ID
+   * @param {string} doctorId - Doctor ID
+   * @returns {Object} Patient and doctor objects
+   * @private
+   */
+  async _getParticipants(patientId, doctorId) {
+    const [patient, doctor] = await Promise.all([
+      Patient.findById(patientId),
+      Doctor.findById(doctorId)
+    ]);
+    
+    return { patient, doctor };
+  }
+  
+  /**
+   * Generate a unique video conference link
+   * @returns {string} Video conference link
+   * @private
+   */
+  _generateVideoLink() {
+    const baseUrl = config.frontendUrl || 'http://localhost:3000';
+    const uniqueId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+    return `${baseUrl}/consultation/${uniqueId}`;
   }
   
   /**

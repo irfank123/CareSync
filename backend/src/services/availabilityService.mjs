@@ -768,217 +768,42 @@ class AvailabilityService {
     }
   }
 
-  /**
-   * Sync time slots with Google Calendar (two-way sync)
-   * @param {string} doctorId - Doctor ID
-   * @param {string} refreshToken - Google refresh token
-   * @param {Date} startDate - Start date
-   * @param {Date} endDate - End date
-   * @param {string} userId - User performing the sync
-   * @returns {Object} Sync results
-   */
-  async syncWithGoogleCalendar(doctorId, refreshToken, startDate, endDate, userId) {
+/**
+ * Sync time slots with Google Calendar (two-way sync)
+ * @param {string} doctorId - Doctor ID
+ * @param {string} refreshToken - Google refresh token
+ * @param {Date} startDate - Start date
+ * @param {Date} endDate - End date
+ * @param {string} userId - User performing the sync
+ * @returns {Object} Sync results
+ */
+async syncWithGoogleCalendar(doctorId, refreshToken, startDate, endDate, userId) {
     const session = await mongoose.startSession();
     session.startTransaction();
     
     try {
       // Get doctor
-      const doctor = await Doctor.findById(doctorId);
-      if (!doctor) {
-        throw new Error('Doctor not found');
-      }
+      const doctor = await this._getDoctorForSync(doctorId);
       
       // Set up Google Calendar client
       const calendar = await this._setupGoogleCalendarClient(refreshToken);
       
-      // Default to current date if not provided
-      const start = startDate || new Date();
-      
-      // Default to 7 days from start date if not provided
-      const end = endDate || new Date(new Date(start).setDate(start.getDate() + 7));
+      // Set date range
+      const { start, end } = this._getDateRange(startDate, endDate);
       
       // Get time slots from database
-      const dbSlots = await TimeSlot.find({
-        doctorId,
-        date: { $gte: start, $lte: end }
-      });
+      const dbSlots = await this._getTimeSlots(doctorId, start, end);
       
       // Get events from Google Calendar
-      const events = await calendar.events.list({
-        calendarId: 'primary',
-        timeMin: start.toISOString(),
-        timeMax: end.toISOString(),
-        singleEvents: true,
-        orderBy: 'startTime'
-      });
+      const events = await this._getGoogleCalendarEvents(calendar, start, end);
       
-      const syncResults = {
-        created: 0,
-        updated: 0,
-        deleted: 0,
-        errors: 0,
-        details: []
-      };
-      
-      // Map of Google Calendar event IDs to events
-      const eventMap = {};
-      events.data.items.forEach(event => {
-        eventMap[event.id] = event;
-      });
-      
-      // First, process slots from the database
-      for (const slot of dbSlots) {
-        try {
-          // If slot has a Google Calendar event ID, update the event
-          if (slot.googleEventId && eventMap[slot.googleEventId]) {
-            // Update event in Google Calendar if needed
-            // You could check if the event times match the slot times first
-            
-            // Mark this event as processed
-            delete eventMap[slot.googleEventId];
-          } 
-          // If slot has no Google Calendar event ID, create a new event
-          else if (!slot.googleEventId) {
-            // Create event date objects
-            const eventDate = new Date(slot.date);
-            
-            // Parse start and end times
-            const [startHour, startMinute] = slot.startTime.split(':').map(Number);
-            const [endHour, endMinute] = slot.endTime.split(':').map(Number);
-            
-            // Set event start and end times
-            const eventStart = new Date(eventDate);
-            eventStart.setHours(startHour, startMinute, 0, 0);
-            
-            const eventEnd = new Date(eventDate);
-            eventEnd.setHours(endHour, endMinute, 0, 0);
-            
-            // Get doctor's user info for name
-            const doctorUser = await User.findById(doctor.userId);
-            const doctorName = doctorUser ? 
-              `Dr. ${doctorUser.firstName} ${doctorUser.lastName}` : 
-              `Dr. CareSync Provider`;
-              
-            // Create event in Google Calendar
-            const event = await calendar.events.insert({
-              calendarId: 'primary',
-              resource: {
-                summary: `Available: ${doctorName}`,
-                description: 'Automatically created by CareSync Availability Management System',
-                start: {
-                  dateTime: eventStart.toISOString(),
-                  timeZone: 'UTC'
-                },
-                end: {
-                  dateTime: eventEnd.toISOString(),
-                  timeZone: 'UTC'
-                },
-                colorId: '2', // Green
-                transparency: 'transparent' // Do not block time
-              }
-            });
-            
-            // Update slot with Google Calendar event ID
-            await TimeSlot.findByIdAndUpdate(slot._id, {
-              googleEventId: event.data.id
-            }, { session });
-            
-            syncResults.created++;
-            syncResults.details.push({
-              slotId: slot._id,
-              status: 'created',
-              eventId: event.data.id
-            });
-          }
-        } catch (slotError) {
-          console.error('Sync slot error:', slotError);
-          syncResults.errors++;
-          syncResults.details.push({
-            slotId: slot._id,
-            status: 'error',
-            error: slotError.message
-          });
-        }
-      }
-      
-      // Then, process remaining events from Google Calendar
-      for (const eventId in eventMap) {
-        try {
-          const event = eventMap[eventId];
-          
-          // Skip all-day events
-          if (!event.start.dateTime || !event.end.dateTime) {
-            continue;
-          }
-          
-          // Extract date and times
-          const eventStart = new Date(event.start.dateTime);
-          const eventEnd = new Date(event.end.dateTime);
-          
-          // Skip events on different days (crossing midnight)
-          if (eventStart.getDate() !== eventEnd.getDate() ||
-              eventStart.getMonth() !== eventEnd.getMonth() ||
-              eventStart.getFullYear() !== eventEnd.getFullYear()) {
-            continue;
-          }
-          
-          // Format times as HH:MM
-          const startTime = 
-            `${String(eventStart.getHours()).padStart(2, '0')}:${String(eventStart.getMinutes()).padStart(2, '0')}`;
-          
-          const endTime = 
-            `${String(eventEnd.getHours()).padStart(2, '0')}:${String(eventEnd.getMinutes()).padStart(2, '0')}`;
-          
-          // Check for availability in the calendar
-          const isAvailabilityEvent = event.summary && 
-                                    (event.summary.includes('Available') || 
-                                     event.summary.includes('CareSync'));
-          
-          if (isAvailabilityEvent) {
-            // Create a new time slot in the database
-            const newSlot = await TimeSlot.create([{
-              doctorId,
-              date: new Date(eventStart.setHours(0, 0, 0, 0)),
-              startTime,
-              endTime,
-              status: 'available',
-              googleEventId: event.id
-            }], { session });
-            
-            syncResults.created++;
-            syncResults.details.push({
-              slotId: newSlot[0]._id,
-              status: 'imported',
-              eventId: event.id
-            });
-          }
-        } catch (eventError) {
-          console.error('Sync event error:', eventError);
-          syncResults.errors++;
-          syncResults.details.push({
-            eventId,
-            status: 'error',
-            error: eventError.message
-          });
-        }
-      }
+      // Process database slots and Google events
+      const syncResults = await this._processSyncOperations(
+        doctor, calendar, dbSlots, events, userId, session
+      );
       
       // Create audit log
-      await AuditLog.create([{
-        userId: userId || doctorId,
-        action: 'sync',
-        resource: 'timeslot',
-        details: {
-          doctorId,
-          startDate: start,
-          endDate: end,
-          service: 'googleCalendar',
-          created: syncResults.created,
-          updated: syncResults.updated,
-          deleted: syncResults.deleted,
-          errors: syncResults.errors
-        }
-      }], { session });
+      await this._createSyncAuditLog(userId, doctorId, start, end, syncResults, session);
       
       // Commit the transaction
       await session.commitTransaction();
@@ -992,6 +817,333 @@ class AvailabilityService {
     } finally {
       session.endSession();
     }
+  }
+  
+  /**
+   * Get doctor for sync operation
+   * @param {string} doctorId - Doctor ID
+   * @returns {Object} Doctor
+   * @private
+   */
+  async _getDoctorForSync(doctorId) {
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      throw new Error('Doctor not found');
+    }
+    return doctor;
+  }
+  
+  /**
+   * Get standardized date range for sync
+   * @param {Date} startDate - Start date (optional)
+   * @param {Date} endDate - End date (optional)
+   * @returns {Object} Standardized start and end dates
+   * @private
+   */
+  _getDateRange(startDate, endDate) {
+    // Default to current date if not provided
+    const start = startDate || new Date();
+    
+    // Default to 7 days from start date if not provided
+    const end = endDate || new Date(new Date(start).setDate(start.getDate() + 7));
+    
+    return { start, end };
+  }
+  
+  /**
+   * Get time slots from database
+   * @param {string} doctorId - Doctor ID
+   * @param {Date} start - Start date
+   * @param {Date} end - End date
+   * @returns {Array} Time slots
+   * @private
+   */
+  async _getTimeSlots(doctorId, start, end) {
+    return await TimeSlot.find({
+      doctorId,
+      date: { $gte: start, $lte: end }
+    });
+  }
+  
+  /**
+   * Get events from Google Calendar
+   * @param {Object} calendar - Google Calendar client
+   * @param {Date} start - Start date
+   * @param {Date} end - End date
+   * @returns {Object} Events response and mapped by ID
+   * @private
+   */
+  async _getGoogleCalendarEvents(calendar, start, end) {
+    const response = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: start.toISOString(),
+      timeMax: end.toISOString(),
+      singleEvents: true,
+      orderBy: 'startTime'
+    });
+    
+    // Create a map of event IDs to events for easy lookup
+    const eventMap = {};
+    response.data.items.forEach(event => {
+      eventMap[event.id] = event;
+    });
+    
+    return { response, eventMap };
+  }
+  
+  /**
+   * Process sync operations between database slots and Google events
+   * @param {Object} doctor - Doctor object
+   * @param {Object} calendar - Google Calendar client
+   * @param {Array} dbSlots - Database time slots
+   * @param {Object} events - Google Calendar events data
+   * @param {string} userId - User ID
+   * @param {Object} session - MongoDB session
+   * @returns {Object} Sync results
+   * @private
+   */
+  async _processSyncOperations(doctor, calendar, dbSlots, events, userId, session) {
+    const { response, eventMap } = events;
+    
+    const syncResults = {
+      created: 0,
+      updated: 0,
+      deleted: 0,
+      errors: 0,
+      details: []
+    };
+    
+    // First, process slots from the database
+    await this._processDbSlots(doctor, calendar, dbSlots, eventMap, syncResults, session);
+    
+    // Then, process remaining events from Google Calendar
+    await this._processGoogleEvents(doctor, eventMap, syncResults, session);
+    
+    return syncResults;
+  }
+  
+  /**
+   * Process database slots for sync
+   * @param {Object} doctor - Doctor object
+   * @param {Object} calendar - Google Calendar client
+   * @param {Array} dbSlots - Database time slots
+   * @param {Object} eventMap - Map of Google event IDs to events
+   * @param {Object} syncResults - Results object to update
+   * @param {Object} session - MongoDB session
+   * @private
+   */
+  async _processDbSlots(doctor, calendar, dbSlots, eventMap, syncResults, session) {
+    for (const slot of dbSlots) {
+      try {
+        // If slot has a Google Calendar event ID, update the event
+        if (slot.googleEventId && eventMap[slot.googleEventId]) {
+          // Update event in Google Calendar if needed
+          // You could check if the event times match the slot times first
+          
+          // Mark this event as processed
+          delete eventMap[slot.googleEventId];
+        } 
+        // If slot has no Google Calendar event ID, create a new event
+        else if (!slot.googleEventId) {
+          await this._createGoogleEvent(doctor, slot, calendar, syncResults, session);
+        }
+      } catch (slotError) {
+        console.error('Sync slot error:', slotError);
+        syncResults.errors++;
+        syncResults.details.push({
+          slotId: slot._id,
+          status: 'error',
+          error: slotError.message
+        });
+      }
+    }
+  }
+  
+  /**
+   * Create a Google Calendar event for a time slot
+   * @param {Object} doctor - Doctor object
+   * @param {Object} slot - Time slot
+   * @param {Object} calendar - Google Calendar client
+   * @param {Object} syncResults - Results object to update
+   * @param {Object} session - MongoDB session
+   * @private
+   */
+  async _createGoogleEvent(doctor, slot, calendar, syncResults, session) {
+    // Create event date objects
+    const eventDate = new Date(slot.date);
+    
+    // Parse start and end times
+    const [startHour, startMinute] = slot.startTime.split(':').map(Number);
+    const [endHour, endMinute] = slot.endTime.split(':').map(Number);
+    
+    // Set event start and end times
+    const eventStart = new Date(eventDate);
+    eventStart.setHours(startHour, startMinute, 0, 0);
+    
+    const eventEnd = new Date(eventDate);
+    eventEnd.setHours(endHour, endMinute, 0, 0);
+    
+    // Get doctor's user info for name
+    const doctorUser = await User.findById(doctor.userId);
+    const doctorName = doctorUser ? 
+      `Dr. ${doctorUser.firstName} ${doctorUser.lastName}` : 
+      `Dr. CareSync Provider`;
+      
+    // Create event in Google Calendar
+    const event = await calendar.events.insert({
+      calendarId: 'primary',
+      resource: {
+        summary: `Available: ${doctorName}`,
+        description: 'Automatically created by CareSync Availability Management System',
+        start: {
+          dateTime: eventStart.toISOString(),
+          timeZone: 'UTC'
+        },
+        end: {
+          dateTime: eventEnd.toISOString(),
+          timeZone: 'UTC'
+        },
+        colorId: '2', // Green
+        transparency: 'transparent' // Do not block time
+      }
+    });
+    
+    // Update slot with Google Calendar event ID
+    await TimeSlot.findByIdAndUpdate(slot._id, {
+      googleEventId: event.data.id
+    }, { session });
+    
+    syncResults.created++;
+    syncResults.details.push({
+      slotId: slot._id,
+      status: 'created',
+      eventId: event.data.id
+    });
+  }
+  
+  /**
+   * Process Google Calendar events for sync
+   * @param {Object} doctor - Doctor object
+   * @param {Object} eventMap - Map of Google event IDs to events
+   * @param {Object} syncResults - Results object to update
+   * @param {Object} session - MongoDB session
+   * @private
+   */
+  async _processGoogleEvents(doctor, eventMap, syncResults, session) {
+    for (const eventId in eventMap) {
+      try {
+        const event = eventMap[eventId];
+        
+        // Skip all-day events
+        if (!event.start.dateTime || !event.end.dateTime) {
+          continue;
+        }
+        
+        // Extract date and times
+        const eventStart = new Date(event.start.dateTime);
+        const eventEnd = new Date(event.end.dateTime);
+        
+        // Skip events on different days (crossing midnight)
+        if (eventStart.getDate() !== eventEnd.getDate() ||
+            eventStart.getMonth() !== eventEnd.getMonth() ||
+            eventStart.getFullYear() !== eventEnd.getFullYear()) {
+          continue;
+        }
+        
+        // Check if this is an availability event
+        const isAvailabilityEvent = this._isAvailabilityEvent(event);
+        
+        if (isAvailabilityEvent) {
+          await this._createTimeSlotFromEvent(doctor._id, event, syncResults, session);
+        }
+      } catch (eventError) {
+        console.error('Sync event error:', eventError);
+        syncResults.errors++;
+        syncResults.details.push({
+          eventId,
+          status: 'error',
+          error: eventError.message
+        });
+      }
+    }
+  }
+  
+  /**
+   * Check if a Google Calendar event is an availability event
+   * @param {Object} event - Google Calendar event
+   * @returns {boolean} Is an availability event
+   * @private
+   */
+  _isAvailabilityEvent(event) {
+    return event.summary && 
+           (event.summary.includes('Available') || 
+            event.summary.includes('CareSync'));
+  }
+  
+  /**
+   * Create a time slot from a Google Calendar event
+   * @param {string} doctorId - Doctor ID
+   * @param {Object} event - Google Calendar event
+   * @param {Object} syncResults - Results object to update
+   * @param {Object} session - MongoDB session
+   * @private
+   */
+  async _createTimeSlotFromEvent(doctorId, event, syncResults, session) {
+    // Extract date and times
+    const eventStart = new Date(event.start.dateTime);
+    const eventEnd = new Date(event.end.dateTime);
+    
+    // Format times as HH:MM
+    const startTime = 
+      `${String(eventStart.getHours()).padStart(2, '0')}:${String(eventStart.getMinutes()).padStart(2, '0')}`;
+    
+    const endTime = 
+      `${String(eventEnd.getHours()).padStart(2, '0')}:${String(eventEnd.getMinutes()).padStart(2, '0')}`;
+    
+    // Create a new time slot in the database
+    const newSlot = await TimeSlot.create([{
+      doctorId,
+      date: new Date(eventStart.setHours(0, 0, 0, 0)),
+      startTime,
+      endTime,
+      status: 'available',
+      googleEventId: event.id
+    }], { session });
+    
+    syncResults.created++;
+    syncResults.details.push({
+      slotId: newSlot[0]._id,
+      status: 'imported',
+      eventId: event.id
+    });
+  }
+  
+  /**
+   * Create audit log for sync operation
+   * @param {string} userId - User ID
+   * @param {string} doctorId - Doctor ID
+   * @param {Date} start - Start date
+   * @param {Date} end - End date
+   * @param {Object} syncResults - Sync results
+   * @param {Object} session - MongoDB session
+   * @private
+   */
+  async _createSyncAuditLog(userId, doctorId, start, end, syncResults, session) {
+    await AuditLog.create([{
+      userId: userId || doctorId,
+      action: 'sync',
+      resource: 'timeslot',
+      details: {
+        doctorId,
+        startDate: start,
+        endDate: end,
+        service: 'googleCalendar',
+        created: syncResults.created,
+        updated: syncResults.updated,
+        deleted: syncResults.deleted,
+        errors: syncResults.errors
+      }
+    }], { session });
   }
 
   /**
