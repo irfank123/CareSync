@@ -1,7 +1,23 @@
 // src/routes/clinicAuthRoutes.mjs
 
 import express from 'express';
-import * as clinicAuthController from '../controllers/clinicAuthController.mjs';
+import { 
+  registerClinicWithDI, 
+  loginClinicWithDI, 
+  verifyClinicEmailWithDI, 
+  submitVerificationWithDI, 
+  getClinicProfileWithDI, 
+  forgotPasswordWithDI,
+  resetPasswordClinicWithDI,
+  updatePasswordClinicWithDI,
+  refreshTokenClinicWithDI,
+  registerClinicValidation,
+  loginClinicValidation,
+  verifyEmailValidation,
+  forgotPasswordClinicValidation,
+  resetPasswordClinicValidation,
+  updatePasswordClinicValidation
+} from '../controllers/clinicAuthController.mjs';
 import { 
   authMiddleware, 
   auditMiddleware,
@@ -16,34 +32,34 @@ router.use(rateLimitMiddleware.authLimiter);
 // Public routes
 router.post(
   '/register',
-  clinicAuthController.registerClinicValidation,
+  registerClinicValidation,
   auditMiddleware.logAuth('clinic-register'),
-  clinicAuthController.registerClinic
+  registerClinicWithDI
 );
 
 router.post(
   '/login',
-  clinicAuthController.loginClinicValidation,
+  loginClinicValidation,
   auditMiddleware.logAuth('clinic-login'),
-  clinicAuthController.loginClinic
+  loginClinicWithDI
 );
 
 router.post(
   '/verify-email',
-  clinicAuthController.verifyEmailValidation,
-  clinicAuthController.verifyClinicEmail
+  verifyEmailValidation,
+  verifyClinicEmailWithDI
 );
 
 router.post(
   '/forgot-password',
-  clinicAuthController.forgotPasswordClinicValidation,
-  clinicAuthController.forgotPassword
+  forgotPasswordClinicValidation,
+  forgotPasswordWithDI
 );
 
 router.put(
   '/reset-password/:resetToken',
-  clinicAuthController.resetPasswordClinicValidation,
-  clinicAuthController.resetPasswordClinic
+  resetPasswordClinicValidation,
+  resetPasswordClinicWithDI
 );
 
 // Protected routes
@@ -52,24 +68,24 @@ router.use(authMiddleware.authenticate); // All routes below this line require a
 router.get(
   '/me',
   auditMiddleware.logAccess('clinic-profile'),
-  clinicAuthController.getClinicProfile
+  getClinicProfileWithDI
 );
 
 router.post(
   '/submit-verification',
   auditMiddleware.logUpdate('clinic-verification'),
-  clinicAuthController.submitVerification
+  submitVerificationWithDI
 );
 
 router.post(
   '/update-password',
-  clinicAuthController.updatePasswordClinicValidation,
-  clinicAuthController.updatePasswordClinic
+  updatePasswordClinicValidation,
+  updatePasswordClinicWithDI
 );
 
 router.post(
   '/refresh-token',
-  clinicAuthController.refreshTokenClinic
+  refreshTokenClinicWithDI
 );
 
 export default router;

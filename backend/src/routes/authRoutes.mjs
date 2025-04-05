@@ -1,7 +1,28 @@
 // src/routes/authRoutes.mjs
 
 import express from 'express';
-import * as authController from '../controllers/authController.mjs';
+import {
+  registerWithDI,
+  loginWithDI,
+  verifyMfaWithDI,
+  auth0CallbackWithDI,
+  logoutWithDI,
+  getMeWithDI,
+  forgotPasswordWithDI,
+  resetPasswordWithDI,
+  updatePasswordWithDI,
+  toggleMfaWithDI,
+  refreshTokenWithDI,
+  verifyEmailWithDI,
+  registerValidation,
+  loginValidation,
+  mfaValidation,
+  forgotPasswordValidation,
+  resetPasswordValidation,
+  updatePasswordValidation,
+  toggleMfaValidation,
+  verifyEmailValidation
+} from '../controllers/authController.mjs';
 import { 
   authMiddleware, 
   validationMiddleware, 
@@ -17,42 +38,42 @@ router.use(rateLimitMiddleware.authLimiter);
 // Public routes
 router.post(
   '/register',
-  validationMiddleware.validate(validationMiddleware.chains.registerUser),
+  validationMiddleware.validate(registerValidation),
   auditMiddleware.logAuth('register'),
-  authController.register
+  registerWithDI
 );
 
 router.post(
   '/login',
   authMiddleware.trackLoginAttempts,
-  validationMiddleware.validate(validationMiddleware.chains.login),
+  validationMiddleware.validate(loginValidation),
   auditMiddleware.logAuth('login'),
-  authController.login
+  loginWithDI
 );
 
 router.post(
   '/verify-mfa',
-  validationMiddleware.validate(authController.mfaValidation),
+  validationMiddleware.validate(mfaValidation),
   auditMiddleware.logAuth('verify-mfa'),
-  authController.verifyMfa
+  verifyMfaWithDI
 );
 
 router.post(
   '/forgot-password',
-  validationMiddleware.validate(authController.forgotPasswordValidation),
-  authController.forgotPassword
+  validationMiddleware.validate(forgotPasswordValidation),
+  forgotPasswordWithDI
 );
 
 router.put(
   '/reset-password/:resetToken',
-  validationMiddleware.validate(authController.resetPasswordValidation),
-  authController.resetPassword
+  validationMiddleware.validate(resetPasswordValidation),
+  resetPasswordWithDI
 );
 
 router.post(
   '/verify-email',
-  validationMiddleware.validate(authController.verifyEmailValidation),
-  authController.verifyEmail
+  validationMiddleware.validate(verifyEmailValidation),
+  verifyEmailWithDI
 );
 
 // Auth0 callback
@@ -60,7 +81,7 @@ router.post(
   '/auth0/callback',
   authMiddleware.verifyAuth0Token,
   auditMiddleware.logAuth('auth0-login'),
-  authController.auth0Callback
+  auth0CallbackWithDI
 );
 
 // Protected routes
@@ -69,30 +90,30 @@ router.use(authMiddleware.authenticate); // All routes below this line require a
 router.get(
   '/me', 
   auditMiddleware.logAccess('user-profile'),
-  authController.getMe
+  getMeWithDI
 );
 
 router.post(
   '/logout',
   auditMiddleware.logAuth('logout'),
-  authController.logout
+  logoutWithDI
 );
 
 router.post(
   '/update-password',
-  validationMiddleware.validate(authController.updatePasswordValidation),
-  authController.updatePassword
+  validationMiddleware.validate(updatePasswordValidation),
+  updatePasswordWithDI
 );
 
 router.post(
   '/refresh-token',
-  authController.refreshToken
+  refreshTokenWithDI
 );
 
 router.post(
   '/toggle-mfa',
-  validationMiddleware.validate(authController.toggleMfaValidation),
-  authController.toggleMfa
+  validationMiddleware.validate(toggleMfaValidation),
+  toggleMfaWithDI
 );
 
 export default router;

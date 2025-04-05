@@ -1,14 +1,15 @@
 // src/controllers/clinicAuthController.mjs
 
 import { check, validationResult } from 'express-validator';
-import clinicAuthService from '../services/clinicAuthService.mjs';
+import { withServices, withServicesForController } from '../utils/controllerHelper.mjs';
+import { formatValidationErrors } from '../utils/errorHandler.mjs';
 
 /**
  * @desc    Register new clinic
  * @route   POST /api/auth/clinic/register
  * @access  Public
  */
-export const registerClinic = async (req, res) => {
+const registerClinic = async (req, res, next, { clinicAuthService }) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -53,7 +54,7 @@ export const registerClinic = async (req, res) => {
  * @route   POST /api/auth/clinic/login
  * @access  Public
  */
-export const loginClinic = async (req, res) => {
+const loginClinic = async (req, res, next, { clinicAuthService }) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -100,7 +101,7 @@ export const loginClinic = async (req, res) => {
  * @route   POST /api/auth/clinic/verify-email
  * @access  Public
  */
-export const verifyClinicEmail = async (req, res) => {
+const verifyClinicEmail = async (req, res, next, { clinicAuthService }) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -132,7 +133,7 @@ export const verifyClinicEmail = async (req, res) => {
  * @route   POST /api/auth/clinic/submit-verification
  * @access  Private (Clinic)
  */
-export const submitVerification = async (req, res) => {
+const submitVerification = async (req, res, next, { clinicAuthService }) => {
   try {
     if (req.userType !== 'clinic') {
       return res.status(403).json({
@@ -173,7 +174,7 @@ export const submitVerification = async (req, res) => {
  * @route   GET /api/auth/clinic/me
  * @access  Private (Clinic)
  */
-export const getClinicProfile = async (req, res) => {
+const getClinicProfile = async (req, res, next, { clinicAuthService }) => {
   try {
     const clinic = clinicAuthService.sanitizeClinicData(req.clinic);
     
@@ -197,7 +198,7 @@ export const getClinicProfile = async (req, res) => {
  * @route   POST /api/auth/clinic/forgot-password
  * @access  Public
  */
-export const forgotPasswordClinic = async (req, res) => {
+const forgotPassword = async (req, res, next, { clinicAuthService }) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -230,7 +231,7 @@ export const forgotPasswordClinic = async (req, res) => {
  * @route   PUT /api/auth/clinic/reset-password/:resetToken
  * @access  Public
  */
-export const resetPasswordClinic = async (req, res) => {
+const resetPasswordClinic = async (req, res, next, { clinicAuthService }) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -267,7 +268,7 @@ export const resetPasswordClinic = async (req, res) => {
  * @route   POST /api/auth/clinic/update-password
  * @access  Private (Clinic)
  */
-export const updatePasswordClinic = async (req, res) => {
+const updatePasswordClinic = async (req, res, next, { clinicAuthService }) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -324,7 +325,7 @@ export const updatePasswordClinic = async (req, res) => {
  * @route   POST /api/auth/clinic/refresh-token
  * @access  Private (Clinic)
  */
-export const refreshTokenClinic = async (req, res) => {
+const refreshTokenClinic = async (req, res, next, { clinicAuthService }) => {
   try {
     if (req.userType !== 'clinic') {
       return res.status(403).json({
@@ -359,6 +360,35 @@ export const refreshTokenClinic = async (req, res) => {
     });
   }
 };
+
+// Controller methods object
+const clinicAuthController = {
+  registerClinic,
+  loginClinic,
+  verifyClinicEmail,
+  submitVerification,
+  getClinicProfile,
+  forgotPassword,
+  resetPasswordClinic,
+  updatePasswordClinic,
+  refreshTokenClinic
+};
+
+// Service dependencies for each method
+const dependencies = {
+  registerClinic: ['clinicAuthService'],
+  loginClinic: ['clinicAuthService'],
+  verifyClinicEmail: ['clinicAuthService'],
+  submitVerification: ['clinicAuthService'],
+  getClinicProfile: ['clinicAuthService'],
+  forgotPassword: ['clinicAuthService'],
+  resetPasswordClinic: ['clinicAuthService'],
+  updatePasswordClinic: ['clinicAuthService'],
+  refreshTokenClinic: ['clinicAuthService']
+};
+
+// Apply DI to the controller
+const enhancedController = withServicesForController(clinicAuthController, dependencies);
 
 // Export validation rules for use in routes
 export const registerClinicValidation = [
@@ -427,3 +457,35 @@ export const updatePasswordClinicValidation = [
     .matches(/[!@#$%^&*(),.?":{}|<>]/)
     .withMessage('New password must contain a special character')
 ];
+
+// Export individual methods with DI
+export const {
+  registerClinic: registerClinicWithDI,
+  loginClinic: loginClinicWithDI,
+  verifyClinicEmail: verifyClinicEmailWithDI,
+  submitVerification: submitVerificationWithDI,
+  getClinicProfile: getClinicProfileWithDI,
+  forgotPassword: forgotPasswordWithDI,
+  resetPasswordClinic: resetPasswordClinicWithDI,
+  updatePasswordClinic: updatePasswordClinicWithDI,
+  refreshTokenClinic: refreshTokenClinicWithDI
+} = enhancedController;
+
+// Default export for compatibility
+export default {
+  registerClinic: registerClinicWithDI,
+  loginClinic: loginClinicWithDI,
+  verifyClinicEmail: verifyClinicEmailWithDI,
+  submitVerification: submitVerificationWithDI,
+  getClinicProfile: getClinicProfileWithDI,
+  forgotPassword: forgotPasswordWithDI,
+  resetPasswordClinic: resetPasswordClinicWithDI,
+  updatePasswordClinic: updatePasswordClinicWithDI,
+  refreshTokenClinic: refreshTokenClinicWithDI,
+  registerClinicValidation,
+  loginClinicValidation,
+  verifyEmailValidation,
+  forgotPasswordClinicValidation,
+  resetPasswordClinicValidation,
+  updatePasswordClinicValidation
+};

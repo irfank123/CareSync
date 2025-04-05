@@ -2,14 +2,16 @@
 
 import express from 'express';
 import {
-  getPatients,
-  getPatient,
-  createPatient,
-  updatePatient,
-  deletePatient,
-  getMyProfile,
-  updateMyProfile,
-  getMedicalHistory
+  getPatientsWithDI,
+  getPatientWithDI,
+  createPatientWithDI,
+  updatePatientWithDI,
+  deletePatientWithDI,
+  getMyProfileWithDI,
+  updateMyProfileWithDI,
+  getMedicalHistoryWithDI,
+  createPatientValidation,
+  updatePatientValidation
 } from '../controllers/patientController.mjs';
 import { 
   authMiddleware, 
@@ -19,7 +21,6 @@ import {
   dataMiddleware,
   cacheMiddleware
 } from '../middleware/index.mjs';
-import patientService from '../services/patientService.mjs';
 
 const router = express.Router();
 
@@ -35,15 +36,15 @@ router.get(
   authMiddleware.restrictTo('patient'),
   cacheMiddleware.cacheResponse(60), // Cache for 1 minute
   auditMiddleware.logAccess('patient-profile'),
-  getMyProfile
+  getMyProfileWithDI
 );
 
 router.put(
   '/me', 
   authMiddleware.restrictTo('patient'),
-  validationMiddleware.validate(validationMiddleware.rules.patient.updateProfile),
+  validationMiddleware.validate(updatePatientValidation),
   auditMiddleware.logUpdate('patient-profile'),
-  updateMyProfile
+  updateMyProfileWithDI
 );
 
 // Admin/Staff/Doctor routes
@@ -52,52 +53,40 @@ router.route('/')
     authMiddleware.restrictTo('admin', 'doctor', 'staff'),
     cacheMiddleware.cacheResponse(120), // Cache for 2 minutes
     auditMiddleware.logAccess('patients'),
-    getPatients
+    getPatientsWithDI
   )
   .post(
     authMiddleware.restrictTo('admin', 'staff'),
-    validationMiddleware.validate([
-      validationMiddleware.rules.patient.userId,
-      validationMiddleware.rules.patient.dateOfBirth,
-      validationMiddleware.rules.patient.gender
-    ]),
+    validationMiddleware.validate(createPatientValidation),
     auditMiddleware.logCreation('patient'),
-    createPatient
+    createPatientWithDI
   );
 
 router.route('/:id')
   .get(
-    // Custom permission check for patient self-access
-    permissionMiddleware.isOwnerOrAdmin(patientService.getPatientUserId.bind(patientService)),
     cacheMiddleware.cacheResponse(120), // Cache for 2 minutes
     auditMiddleware.logAccess('patient'),
-    getPatient
+    getPatientWithDI
   )
   .put(
-    // Custom permission check for patient self-access
-    permissionMiddleware.isOwnerOrAdmin(patientService.getPatientUserId.bind(patientService)),
-    validationMiddleware.validate([
-      validationMiddleware.rules.patient.dateOfBirth.optional(),
-      validationMiddleware.rules.patient.gender.optional()
-    ]),
+    validationMiddleware.validate(updatePatientValidation),
     auditMiddleware.logUpdate('patient'),
     cacheMiddleware.clearCacheOnWrite('patients'),
-    updatePatient
+    updatePatientWithDI
   )
   .delete(
     authMiddleware.restrictTo('admin'),
     auditMiddleware.logDeletion('patient'),
     cacheMiddleware.clearCacheOnWrite('patients'),
-    deletePatient
+    deletePatientWithDI
   );
 
 // Medical history route
 router.get(
   '/:id/medical-history',
-  permissionMiddleware.isOwnerOrAdmin(patientService.getPatientUserId.bind(patientService)),
   cacheMiddleware.cacheResponse(60), // Cache for 1 minute
   auditMiddleware.logAccess('medical-history'),
-  getMedicalHistory
+  getMedicalHistoryWithDI
 );
 
 export default router;

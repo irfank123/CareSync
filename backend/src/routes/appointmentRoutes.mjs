@@ -2,18 +2,19 @@
 
 import express from 'express';
 import {
-  getAppointments,
-  getAppointment,
-  createAppointment,
-  updateAppointment,
-  deleteAppointment,
-  getPatientAppointments,
-  getDoctorAppointments,
-  getUpcomingAppointments,
+  getAppointmentsWithDI,
+  getAppointmentWithDI,
+  createAppointmentWithDI,
+  updateAppointmentWithDI,
+  deleteAppointmentWithDI,
+  getPatientAppointmentsWithDI,
+  getDoctorAppointmentsWithDI,
+  getUpcomingAppointmentsWithDI,
   createAppointmentValidation,
   updateAppointmentValidation
 } from '../controllers/appointmentController.mjs';
 import authMiddleware from '../middleware/auth/authMiddleware.mjs';
+import { auditMiddleware, cacheMiddleware } from '../middleware/index.mjs';
 
 const router = express.Router();
 
@@ -21,22 +22,57 @@ const router = express.Router();
 router.use(authMiddleware.authenticate);
 
 // Get upcoming appointments for the current user
-router.get('/upcoming', getUpcomingAppointments);
+router.get(
+  '/upcoming', 
+  cacheMiddleware.cacheResponse(60), // Cache for 1 minute
+  getUpcomingAppointmentsWithDI
+);
 
 // Patient-specific routes
-router.get('/patient/:patientId', getPatientAppointments);
+router.get(
+  '/patient/:patientId',
+  auditMiddleware.logAccess('patient-appointments'),
+  getPatientAppointmentsWithDI
+);
 
 // Doctor-specific routes
-router.get('/doctor/:doctorId', getDoctorAppointments);
+router.get(
+  '/doctor/:doctorId',
+  auditMiddleware.logAccess('doctor-appointments'),
+  getDoctorAppointmentsWithDI
+);
 
 // General appointment routes
 router.route('/')
-  .get(authMiddleware.restrictTo('admin', 'doctor', 'staff'), getAppointments)
-  .post(createAppointmentValidation, createAppointment);
+  .get(
+    authMiddleware.restrictTo('admin', 'doctor', 'staff'),
+    cacheMiddleware.cacheResponse(120), // Cache for 2 minutes
+    auditMiddleware.logAccess('appointments'),
+    getAppointmentsWithDI
+  )
+  .post(
+    createAppointmentValidation,
+    auditMiddleware.logCreation('appointment'),
+    createAppointmentWithDI
+  );
 
 router.route('/:id')
-  .get(getAppointment)
-  .put(updateAppointmentValidation, updateAppointment)
-  .delete(authMiddleware.restrictTo('admin'), deleteAppointment);
+  .get(
+    cacheMiddleware.cacheResponse(60), // Cache for 1 minute
+    auditMiddleware.logAccess('appointment'),
+    getAppointmentWithDI
+  )
+  .put(
+    updateAppointmentValidation,
+    auditMiddleware.logUpdate('appointment'),
+    cacheMiddleware.clearCacheOnWrite('appointments'),
+    updateAppointmentWithDI
+  )
+  .delete(
+    authMiddleware.restrictTo('admin'),
+    auditMiddleware.logDeletion('appointment'),
+    cacheMiddleware.clearCacheOnWrite('appointments'),
+    deleteAppointmentWithDI
+  );
 
 export default router;

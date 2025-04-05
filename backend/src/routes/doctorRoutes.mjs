@@ -2,14 +2,16 @@
 
 import express from 'express';
 import {
-  getDoctors,
-  getDoctor,
-  createDoctor,
-  updateDoctor,
-  deleteDoctor,
-  getMyProfile,
-  updateMyProfile,
-  getDoctorAvailability
+  getDoctorsWithDI,
+  getDoctorWithDI,
+  createDoctorWithDI,
+  updateDoctorWithDI,
+  deleteDoctorWithDI,
+  getMyProfileWithDI,
+  updateMyProfileWithDI,
+  getDoctorAvailabilityWithDI,
+  createDoctorValidation,
+  updateDoctorValidation
 } from '../controllers/doctorController.mjs';
 import { 
   authMiddleware, 
@@ -28,21 +30,21 @@ router.get(
   '/',
   cacheMiddleware.cacheResponse(300), // Cache for 5 minutes
   cacheMiddleware.setCacheHeaders({ public: true, maxAge: 3600 }),
-  getDoctors
+  getDoctorsWithDI
 );
 
 router.get(
   '/:id',
   cacheMiddleware.cacheResponse(300), // Cache for 5 minutes
   cacheMiddleware.setCacheHeaders({ public: true, maxAge: 3600 }),
-  getDoctor
+  getDoctorWithDI
 );
 
 router.get(
   '/:id/availability',
   cacheMiddleware.cacheResponse(60), // Cache for 1 minute
   cacheMiddleware.setCacheHeaders({ public: true, maxAge: 300 }),
-  getDoctorAvailability
+  getDoctorAvailabilityWithDI
 );
 
 // Protect remaining routes with authentication
@@ -57,7 +59,7 @@ router.get(
   authMiddleware.restrictTo('doctor'),
   cacheMiddleware.cacheResponse(60), // Cache for 1 minute
   auditMiddleware.logAccess('doctor-profile'),
-  getMyProfile
+  getMyProfileWithDI
 );
 
 router.put(
@@ -69,7 +71,7 @@ router.put(
   ]),
   auditMiddleware.logUpdate('doctor-profile'),
   cacheMiddleware.clearCacheOnWrite('doctors'),
-  updateMyProfile
+  updateMyProfileWithDI
 );
 
 // Admin/Staff routes
@@ -84,7 +86,7 @@ router.post(
   ]),
   auditMiddleware.logCreation('doctor'),
   cacheMiddleware.clearCacheOnWrite('doctors'),
-  createDoctor
+  createDoctorWithDI
 );
 
 router.put(
@@ -97,7 +99,7 @@ router.put(
   ]),
   auditMiddleware.logUpdate('doctor'),
   cacheMiddleware.clearCacheOnWrite('doctors'),
-  updateDoctor
+  updateDoctorWithDI
 );
 
 router.delete(
@@ -105,7 +107,7 @@ router.delete(
   authMiddleware.restrictTo('admin'),
   auditMiddleware.logDeletion('doctor'),
   cacheMiddleware.clearCacheOnWrite('doctors'),
-  deleteDoctor
+  deleteDoctorWithDI
 );
 
 export default router;
