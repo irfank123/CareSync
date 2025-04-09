@@ -42,8 +42,9 @@ import {
 
 const Dashboard = () => {
   const { user } = useAuth();
-  const isDoctor = user?.role === 'doctor';
   const [selectedTab, setSelectedTab] = useState(0);
+  // Temporarily force doctor view for testing
+  const isDoctor = true; // Change this to false to see patient view
 
   // Mock data for doctor's dashboard
   const doctorStats = {
@@ -471,7 +472,7 @@ const Dashboard = () => {
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Typography variant="h4" component="h1" gutterBottom>
-        Welcome, {user?.name || 'Doctor'}!
+        Welcome, {user?.name || 'User'}!
       </Typography>
       <Typography variant="subtitle1" color="text.secondary" paragraph>
         {isDoctor ? 'Here\'s your practice overview' : 'Here\'s your health overview'}
