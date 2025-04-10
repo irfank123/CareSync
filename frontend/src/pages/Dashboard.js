@@ -44,7 +44,7 @@ const Dashboard = () => {
   const { user } = useAuth();
   const [selectedTab, setSelectedTab] = useState(0);
   // Temporarily force doctor view for testing
-  const isDoctor = true; // Change this to false to see patient view
+  const isDoctor = false; // Change this to false to see patient view
 
   // Mock data for doctor's dashboard
   const doctorStats = {
