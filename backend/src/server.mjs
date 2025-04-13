@@ -143,9 +143,7 @@ const startApp = async () => {
   }
 };
 
-// Start the application if this is the main module
-if (import.meta.url === `file://${process.argv[1]}`) {
-  startApp();
-}
+
+startApp();
 
 export default startApp;
