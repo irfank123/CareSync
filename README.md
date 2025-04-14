@@ -1,6 +1,5 @@
 # CareSync - Telehealth Application
 
-
 ## Overview
 
 CareSync is a comprehensive telehealth platform designed to bridge the gap between healthcare providers and patients through virtual consultations. Our platform enables seamless scheduling, virtual appointments, and digital health management while maintaining the highest standards of privacy and security.
@@ -15,21 +14,22 @@ CareSync is a comprehensive telehealth platform designed to bridge the gap betwe
 
 ## Demo
 
-
-
 The application currently features functional implementations of:
+
 - Doctor availability management dashboard
 - Patient appointment scheduling interface
 
 ## Technologies
 
 ### Frontend
+
 - React.js with TypeScript
 - Tailwind CSS for styling
 - Context API for state management
 - WebRTC for video conferencing (planned)
 
 ### Backend (Planned)
+
 - Node.js with Express
 - PostgreSQL database
 - JWT authentication
@@ -38,28 +38,29 @@ The application currently features functional implementations of:
 ## Getting Started
 
 ### Prerequisites
+
 - Node.js (v14.0.0 or later)
 - npm (v6.0.0 or later)
 
 ### Installation
 
 1. Clone the repository
+
    ```bash
    git clone https://github.com/irfank123/CareSync.git
    cd CareSync
    ```
-
 2. Install frontend dependencies
+
    ```bash
    cd frontend
    npm install
    ```
-
 3. Start the development server
+
    ```bash
    npm start
    ```
-
 4. Open your browser and navigate to http://localhost:3000
 
 ## Project Structure
@@ -90,11 +91,13 @@ CareSync/
 This project is currently in the development phase. The frontend component structure has been established and key UI components have been implemented. Backend services are planned for future development.
 
 ### Implemented
+
 - Project structure and architecture
 - Physician availability management interface
 - Appointment scheduling interface
 
 ### In Progress
+
 - Authentication system
 - Virtual consultation interface
 - Health assessment form
@@ -103,21 +106,22 @@ This project is currently in the development phase. The frontend component struc
 ## Roadmap
 
 1. **Phase 1: Frontend Structure & Core UI (Current)**
+
    - Set up project architecture
    - Implement key UI components
    - Create responsive design
-
 2. **Phase 2: Authentication & State Management**
+
    - Implement user authentication
    - Add global state management
    - Create protected routes
-
 3. **Phase 3: Backend Development**
+
    - Build RESTful API
    - Set up database
    - Implement business logic
-
 4. **Phase 4: Video Consultations & Advanced Features**
+
    - Integrate WebRTC for video
    - Add prescription system
    - Implement notifications
@@ -138,3 +142,9 @@ Please ensure your code follows the project's coding standards and includes appr
 
 Project Link: [https://github.com/irfank123/CareSync](https://github.com/irfank123/CareSync)
 
+
+
+
+# Tests
+
+- test connection at - http://localhost:3000/test

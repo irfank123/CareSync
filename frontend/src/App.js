@@ -23,6 +23,7 @@ import NotFound from './pages/NotFound';
 import Header from './components/common/Header';
 import Footer from './components/common/Footer';
 import AuthWrapper from './components/auth/AuthWrapper';
+import TestConnection from './components/TestConnection';
 
 // Context
 import { AuthProvider } from './context/AuthContext';
@@ -48,6 +49,7 @@ function App() {
                 <Route path="/patients" element={<Patients />} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/test" element={<TestConnection />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </main>
