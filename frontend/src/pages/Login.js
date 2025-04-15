@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Container,
   Paper,
@@ -7,32 +7,98 @@ import {
   Button,
   Typography,
   Box,
-  Alert
+  Link,
+  Alert,
+  CircularProgress,
+  Snackbar
 } from '@mui/material';
-import { useAuth } from '../context/AuthContext';
+import { toast } from 'react-toastify';
+import { authService } from '../services/api';
 
 const Login = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
   const navigate = useNavigate();
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+    mfaCode: ''
+  });
+  const [errors, setErrors] = useState({});
+  const [isLoading, setIsLoading] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [loginAttempts, setLoginAttempts] = useState(0);
+  const [mfaCodeSent, setMfaCodeSent] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  // Clear error message when form data changes
+  useEffect(() => {
+    setErrorMessage('');
+  }, [formData]);
+
+  const validateForm = () => {
+    const newErrors = {};
+    if (!formData.email) newErrors.email = 'Email is required';
+    if (!formData.password) newErrors.password = 'Password is required';
+    if (mfaRequired && !formData.mfaCode) newErrors.mfaCode = 'MFA code is required';
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    if (errors[name]) {
+      setErrors(prev => ({ ...prev, [name]: '' }));
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setIsLoading(true);
+    if (!validateForm()) return;
 
+    setIsLoading(true);
     try {
-      const result = await login({ email, password });
-      if (result.success) {
-        navigate('/dashboard');
-      } else {
-        setError(result.error);
+      // Add exponential backoff delay if there were previous failed attempts
+      if (loginAttempts > 0) {
+        const delay = Math.min(1000 * Math.pow(2, loginAttempts - 1), 30000);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-    } catch (err) {
-      setError('An unexpected error occurred. Please try again.');
+
+      const response = await authService.login({
+        email: formData.email,
+        password: formData.password,
+        ...(mfaRequired && { mfaCode: formData.mfaCode })
+      });
+      
+      if (response.success) {
+        toast.success('Login successful!');
+        navigate('/dashboard');
+      } else if (response.requiresMfa && !mfaRequired) {
+        setMfaRequired(true);
+        setMfaCodeSent(true);
+        toast.info('MFA code has been sent to your email');
+      }
+    } catch (error) {
+      setLoginAttempts(prev => prev + 1);
+      
+      if (error.response) {
+        switch (error.response.status) {
+          case 401:
+            setErrorMessage('Invalid email or password');
+            break;
+          case 429:
+            setErrorMessage('Too many login attempts. Please try again later.');
+            break;
+          case 403:
+            setErrorMessage('Your account has been disabled. Please contact support.');
+            break;
+          default:
+            setErrorMessage(error.response.data?.message || 'Login failed. Please try again.');
+        }
+      } else {
+        setErrorMessage('Network error. Please check your connection and try again.');
+      }
+      
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -52,14 +118,20 @@ const Login = () => {
           <Typography component="h1" variant="h5" align="center" gutterBottom>
             Sign In
           </Typography>
-          
-          {error && (
+
+          {errorMessage && (
             <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
+              {errorMessage}
             </Alert>
           )}
 
-          <Box component="form" onSubmit={handleSubmit} noValidate>
+          {mfaCodeSent && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              MFA code has been sent to your email
+            </Alert>
+          )}
+
+          <Box component="form" onSubmit={handleSubmit} noValidate sx={{ mt: 1 }}>
             <TextField
               margin="normal"
               required
@@ -69,8 +141,11 @@ const Login = () => {
               name="email"
               autoComplete="email"
               autoFocus
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={formData.email}
+              onChange={handleInputChange}
+              error={!!errors.email}
+              helperText={errors.email}
+              disabled={isLoading}
             />
             <TextField
               margin="normal"
@@ -81,9 +156,30 @@ const Login = () => {
               type="password"
               id="password"
               autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              value={formData.password}
+              onChange={handleInputChange}
+              error={!!errors.password}
+              helperText={errors.password}
+              disabled={isLoading}
             />
+
+            {mfaRequired && (
+              <TextField
+                margin="normal"
+                required
+                fullWidth
+                name="mfaCode"
+                label="MFA Code"
+                type="text"
+                id="mfaCode"
+                value={formData.mfaCode}
+                onChange={handleInputChange}
+                error={!!errors.mfaCode}
+                helperText={errors.mfaCode}
+                disabled={isLoading}
+              />
+            )}
+
             <Button
               type="submit"
               fullWidth
@@ -91,8 +187,17 @@ const Login = () => {
               sx={{ mt: 3, mb: 2 }}
               disabled={isLoading}
             >
-              {isLoading ? 'Signing in...' : 'Sign In'}
+              {isLoading ? <CircularProgress size={24} /> : 'Sign In'}
             </Button>
+
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between' }}>
+              <Link component={RouterLink} to="/forgot-password" variant="body2">
+                Forgot password?
+              </Link>
+              <Link component={RouterLink} to="/register" variant="body2">
+                {"Don't have an account? Sign Up"}
+              </Link>
+            </Box>
           </Box>
         </Paper>
       </Box>

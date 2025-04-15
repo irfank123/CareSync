@@ -30,10 +30,10 @@ import { AuthProvider } from './context/AuthContext';
 
 function App() {
   return (
-    <AuthProvider>
+    <Router>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <Router>
+        <AuthProvider>
           <AuthWrapper>
             <Header />
             <main style={{ minHeight: 'calc(100vh - 64px - 100px)', padding: '20px' }}>
@@ -56,9 +56,9 @@ function App() {
             <Footer />
             <ToastContainer position="bottom-right" />
           </AuthWrapper>
-        </Router>
+        </AuthProvider>
       </ThemeProvider>
-    </AuthProvider>
+    </Router>
   );
 }
 

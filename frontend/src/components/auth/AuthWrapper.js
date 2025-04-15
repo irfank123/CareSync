@@ -1,16 +1,13 @@
-// import React from 'react';
-// import { Navigate, useLocation } from 'react-router-dom';
-// import { useAuth } from '../../context/AuthContext';
-// import { CircularProgress, Box } from '@mui/material';
+import React from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
+import { CircularProgress, Box } from '@mui/material';
 
 const AuthWrapper = ({ children }) => {
-
-
-  /* Original code - uncomment when ready to restore auth
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
   const location = useLocation();
 
-  if (isLoading) {
+  if (loading) {
     return (
       <Box
         display="flex"
@@ -24,7 +21,7 @@ const AuthWrapper = ({ children }) => {
   }
 
   // List of public routes that don't require authentication
-  const publicRoutes = ['/', '/login', '/register'];
+  const publicRoutes = ['/', '/login', '/register', '/forgot-password'];
 
   // If the user is not authenticated and trying to access a protected route
   if (!isAuthenticated && !publicRoutes.includes(location.pathname)) {
@@ -35,7 +32,6 @@ const AuthWrapper = ({ children }) => {
   if (isAuthenticated && (location.pathname === '/login' || location.pathname === '/register')) {
     return <Navigate to="/dashboard" replace />;
   }
-  */
 
   return children;
 };

@@ -1,90 +1,174 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import authService from '../services/authService';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
+import { authService } from '../services/api';
 
-const AuthContext = createContext();
+const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('token'));
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
+  // Check for token expiration and refresh if needed
   useEffect(() => {
-    const initializeAuth = async () => {
-      if (token) {
-        try {
-          const userData = await authService.getMe();
-          setUser(userData);
-          setIsAuthenticated(true);
-        } catch (error) {
-          console.error('Failed to fetch user data:', error);
-          logout();
+    const checkAuth = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (token) {
+          // Check if token is expired
+          const tokenData = JSON.parse(atob(token.split('.')[1]));
+          const expirationTime = tokenData.exp * 1000; // Convert to milliseconds
+          
+          if (expirationTime < Date.now()) {
+            // Token expired, try to refresh
+            try {
+              await authService.refreshToken();
+            } catch (error) {
+              // If refresh fails, logout
+              await authService.logout();
+              navigate('/login');
+              return;
+            }
+          }
+          
+          // Get user data
+          const storedUser = JSON.parse(localStorage.getItem('user'));
+          if (storedUser) {
+            setUser(storedUser);
+          }
         }
+      } catch (error) {
+        console.error('Auth check error:', error);
+        await authService.logout();
+        navigate('/login');
+      } finally {
+        setLoading(false);
       }
-      setIsLoading(false);
     };
 
-    initializeAuth();
-  }, [token]);
+    checkAuth();
+  }, [navigate]);
 
   const login = async (credentials) => {
     try {
-      const { user, token } = await authService.login(credentials);
-      localStorage.setItem('token', token);
-      setToken(token);
-      setUser(user);
-      setIsAuthenticated(true);
-      return { success: true };
+      setLoading(true);
+      const response = await authService.login(credentials);
+      
+      if (response.success) {
+        setUser(response.user);
+        toast.success('Login successful!');
+        navigate('/dashboard');
+        return { success: true };
+      } else if (response.requiresMfa) {
+        return { success: true, requiresMfa: true };
+      } else {
+        toast.error(response.message || 'Login failed');
+        return { success: false, error: response.message };
+      }
     } catch (error) {
-      console.error('Login failed:', error);
-      return { success: false, error: error.response?.data?.message || 'Login failed' };
+      const errorMessage = error.response?.data?.message || 'An error occurred during login';
+      toast.error(errorMessage);
+      return { success: false, error: errorMessage };
+    } finally {
+      setLoading(false);
     }
   };
 
   const register = async (userData) => {
     try {
-      const { user, token } = await authService.register(userData);
-      localStorage.setItem('token', token);
-      setToken(token);
-      setUser(user);
-      setIsAuthenticated(true);
-      return { success: true };
+      setLoading(true);
+      const response = await authService.register(userData);
+      
+      if (response.success) {
+        setUser(response.user);
+        toast.success('Registration successful!');
+        navigate('/dashboard');
+        return { success: true };
+      } else {
+        toast.error(response.message || 'Registration failed');
+        return { success: false, error: response.message };
+      }
     } catch (error) {
-      console.error('Registration failed:', error);
-      return { success: false, error: error.response?.data?.message || 'Registration failed' };
+      const errorMessage = error.response?.data?.message || 'An error occurred during registration';
+      toast.error(errorMessage);
+      return { success: false, error: errorMessage };
+    } finally {
+      setLoading(false);
     }
   };
 
   const logout = async () => {
     try {
+      setLoading(true);
       await authService.logout();
-    } catch (error) {
-      console.error('Logout failed:', error);
-    } finally {
-      localStorage.removeItem('token');
-      setToken(null);
       setUser(null);
-      setIsAuthenticated(false);
+      toast.info('You have been logged out');
+      navigate('/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Still clear local state even if server logout fails
+      setUser(null);
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      navigate('/login');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const verifyMfa = async (email, mfaCode) => {
+    try {
+      setLoading(true);
+      const response = await authService.verifyMfa(email, mfaCode);
+      
+      if (response.success) {
+        setUser(response.user);
+        toast.success('MFA verification successful!');
+        navigate('/dashboard');
+        return { success: true };
+      } else {
+        toast.error(response.message || 'MFA verification failed');
+        return { success: false, error: response.message };
+      }
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || 'An error occurred during MFA verification';
+      toast.error(errorMessage);
+      return { success: false, error: errorMessage };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateUserProfile = (updatedData) => {
+    setUser(prev => ({ ...prev, ...updatedData }));
+    localStorage.setItem('user', JSON.stringify({ ...user, ...updatedData }));
   };
 
   const value = {
     user,
-    token,
-    isAuthenticated,
-    isLoading,
+    loading,
     login,
     register,
-    logout
+    logout,
+    verifyMfa,
+    updateUserProfile,
+    isAuthenticated: !!user,
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {!loading && children}
+    </AuthContext.Provider>
+  );
 };
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}; 
+};
+
+export default AuthContext; 
