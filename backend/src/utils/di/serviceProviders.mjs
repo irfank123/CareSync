@@ -10,7 +10,7 @@ import patientService from '../../services/patientService.mjs';
 import doctorService from '../../services/doctorService.mjs';
 import staffService from '../../services/staffService.mjs';
 import appointmentService from '../../services/appointmentService.mjs';
-import authService from '../../services/authService.mjs';
+import createAuthService from '../../services/authService.mjs';
 import clinicAuthService from '../../services/clinicAuthService.mjs';
 import tokenBlacklistService from '../../services/tokenBlacklistService.mjs';
 import availabilityService from '../../services/availabilityService.mjs';
@@ -51,6 +51,9 @@ class CoreServiceProvider {
       }
     });
     
+    // Register basic services first (no dependencies)
+    container.register('tokenBlacklistService', tokenBlacklistService);
+    
     // Email service factory with async initialization
     container.factory('emailService', async (transporter) => {
       // Set up the real transporter if we're using a mock
@@ -86,144 +89,27 @@ class CoreServiceProvider {
       return emailService;
     }, ['emailTransporter']);
     
-    // Register basic services
-    container.register('tokenBlacklistService', tokenBlacklistService);
+    // Register core domain services
+    container.register('userService', userService);
+    container.register('patientService', patientService);
+    container.register('doctorService', doctorService); 
+    container.register('staffService', staffService);
     
     // Auth services with dependencies
-    container.register('authService', authService, ['emailService']);
-    container.register('clinicAuthService', clinicAuthService, ['emailService']);
+    // Create auth service through factory function to avoid circular dependencies
+    container.factory('authService', (emailService) => {
+      return createAuthService(emailService);
+    }, ['emailService']);
     
-    // Core domain services
-    container.register('userService', userService);
-    container.register('patientService', patientService, ['userService']);
-    container.register('doctorService', doctorService, ['userService']);
-    container.register('staffService', staffService, ['userService']);
+    // Pass emailService to clinicAuthService - should update implementation to match authService pattern
+    container.register('clinicAuthService', clinicAuthService);
     
     // Services that depend on multiple other services
-    container.register('availabilityService', availabilityService, ['doctorService']);
-    container.register('appointmentService', appointmentService, 
-      ['patientService', 'doctorService', 'emailService']);
+    container.register('availabilityService', availabilityService);
+    
+    // Register appointment service last since it has many dependencies
+    container.register('appointmentService', appointmentService);
       
-    return container;
-  }
-}
-
-/**
- * Auth service provider for authentication services
- */
-class AuthServiceProvider {
-  /**
-   * Register auth services with the container
-   * @returns {Object} The container
-   */
-  register() {
-    // Only register these if they haven't been registered already
-    if (!container.has('authService')) {
-      container.register('authService', authService, ['emailService']);
-    }
-    
-    if (!container.has('clinicAuthService')) {
-      container.register('clinicAuthService', clinicAuthService, ['emailService']);
-    }
-    
-    if (!container.has('tokenBlacklistService')) {
-      container.register('tokenBlacklistService', tokenBlacklistService);
-    }
-    
-    return container;
-  }
-}
-
-/**
- * User management service provider
- */
-class UserServiceProvider {
-  /**
-   * Register user-related services with the container
-   * @returns {Object} The container
-   */
-  register() {
-    // Only register these if they haven't been registered already
-    if (!container.has('userService')) {
-      container.register('userService', userService);
-    }
-    
-    if (!container.has('patientService')) {
-      container.register('patientService', patientService, ['userService']);
-    }
-    
-    if (!container.has('doctorService')) {
-      container.register('doctorService', doctorService, ['userService']);
-    }
-    
-    if (!container.has('staffService')) {
-      container.register('staffService', staffService, ['userService']);
-    }
-    
-    return container;
-  }
-}
-
-/**
- * Appointment management service provider
- */
-class AppointmentServiceProvider {
-  /**
-   * Register appointment-related services with the container
-   * @returns {Object} The container
-   */
-  register() {
-    // Make sure dependencies are registered
-    if (!container.has('patientService')) {
-      container.register('patientService', patientService, ['userService']);
-    }
-    
-    if (!container.has('doctorService')) {
-      container.register('doctorService', doctorService, ['userService']);
-    }
-    
-    if (!container.has('emailService')) {
-      // If not registered, register email service with its dependencies
-      if (!container.has('emailTransporter')) {
-        // Register the email transporter factory
-        container.factory('emailTransporter', () => {
-          if (process.env.NODE_ENV === 'production') {
-            // In production, use configured email provider
-            return nodemailer.createTransport({
-              host: config.email.host,
-              port: config.email.port,
-              secure: config.email.port === 465,
-              auth: {
-                user: config.email.auth.user,
-                pass: config.email.auth.pass
-              }
-            });
-          } else {
-            return { 
-              sendMail: options => Promise.resolve({ messageId: 'mock-email' }),
-              isMock: true
-            };
-          }
-        });
-      }
-      
-      // Register email service with transporter dependency
-      container.factory('emailService', async (transporter) => {
-        emailService.transporter = transporter;
-        emailService.initialized = true;
-        return emailService;
-      }, ['emailTransporter']);
-    }
-    
-    // Register availability service if not already registered
-    if (!container.has('availabilityService')) {
-      container.register('availabilityService', availabilityService, ['doctorService']);
-    }
-    
-    // Register appointment service with its dependencies
-    container.register('appointmentService', appointmentService, 
-      ['patientService', 'doctorService', 'emailService', 'availabilityService']);
-    
     return container;
   }
 }
@@ -237,12 +123,8 @@ class AppServiceProvider {
    * @returns {Object} The container
    */
   static registerAll() {
-    // Register all services
+    // Register all services through core provider
     new CoreServiceProvider().register();
-    new AuthServiceProvider().register();
-    new UserServiceProvider().register();
-    new AppointmentServiceProvider().register();
-    
     return container;
   }
   
@@ -272,12 +154,6 @@ class AppServiceProvider {
   }
 }
 
-export {
-  CoreServiceProvider,
-  AuthServiceProvider,
-  UserServiceProvider,
-  AppointmentServiceProvider,
-  AppServiceProvider
-};
+export { AppServiceProvider };
 
 export default AppServiceProvider;

@@ -34,30 +34,62 @@ const register = async (req, res, next, { authService }) => {
  * @route   POST /api/auth/login
  * @access  Public
  */
+/**
+ * @desc    Login user
+ * @route   POST /api/auth/login
+ * @access  Public
+ */
 const login = async (req, res, next, { authService }) => {
-  // Check for validation errors
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json(formatValidationErrors(errors.array()));
-  }
+  try {
+    // Check if authService is available
+    if (!authService) {
+      return res.status(500).json({
+        success: false,
+        message: 'Authentication service unavailable'
+      });
+    }
 
-  const { email, password } = req.body;
-  
-  const result = await authService.loginUser(email, password);
-  
-  // If MFA is required, return partial response
-  if (result.requiresMfa) {
-    return res.status(200).json({
-      success: true,
-      requiresMfa: true,
-      user: result.user
+    // Check for validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json(formatValidationErrors(errors.array()));
+    }
+
+    const { email, password } = req.body;
+    
+    // Use try-catch to handle specific auth errors
+    try {
+      const result = await authService.loginUser(email, password);
+      
+      // If MFA is required, return partial response
+      if (result.requiresMfa) {
+        return res.status(200).json({
+          success: true,
+          requiresMfa: true,
+          user: result.user
+        });
+      }
+      
+      // Send response with cookie
+      sendTokenResponse(result.user, 200, res, result.token, result.roleData);
+    } catch (authError) {
+      // Return proper error response based on error type
+      console.error('Authentication error:', authError);
+      return res.status(401).json({
+        success: false,
+        message: authError.message || 'Invalid credentials'
+      });
+    }
+  } catch (error) {
+    console.error('Login controller error:', error);
+    
+    // Send a proper error response instead of crashing
+    res.status(500).json({
+      success: false,
+      message: 'Server error during authentication'
     });
   }
-  
-  // Send response with cookie
-  sendTokenResponse(result.user, 200, res, result.token, result.roleData);
 };
-
 /**
  * @desc    Verify MFA code
  * @route   POST /api/auth/verify-mfa

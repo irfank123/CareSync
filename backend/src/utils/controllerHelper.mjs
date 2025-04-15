@@ -15,14 +15,20 @@ export const withServices = (controllerFn, serviceNames = []) => {
       const services = {};
       
       for (const name of serviceNames) {
-        services[name] = req.container 
-          ? req.container.getService(name) 
-          : AppServiceProvider.getService(name);
+        try {
+          services[name] = req.container 
+            ? req.container.getService(name) 
+            : AppServiceProvider.getService(name);
+        } catch (serviceError) {
+          console.error(`Error getting service ${name}:`, serviceError);
+          // Continue with other services, this service will be undefined
+        }
       }
       
       // Call controller with services and standard args
       await controllerFn(req, res, next, services);
     } catch (error) {
+      console.error('Controller error:', error);
       next(error);
     }
   };
@@ -54,4 +60,3 @@ export const withServicesForController = (controller, serviceMappings = {}) => {
   
   return decoratedController;
 };
-
