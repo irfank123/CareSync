@@ -76,6 +76,67 @@ const dataMiddleware = {
   },
   
   /**
+   * Helper function to recursively sanitize objects
+   * @param {Object} obj - Object to sanitize
+   * @param {Array} sensitiveFields - Fields to remove
+   * @param {WeakMap} seen - Map of already processed objects to prevent circular references
+   * @returns {Object} Sanitized object
+   * @private
+   */
+  _sanitizeObject: (obj, sensitiveFields, seen = new WeakMap()) => {
+    // Handle null or non-objects
+    if (!obj || typeof obj !== 'object') {
+      return obj;
+    }
+    
+    // Handle Date objects
+    if (obj instanceof Date) {
+      return new Date(obj);
+    }
+    
+    // Detect circular references
+    if (seen.has(obj)) {
+      return "[Circular Reference]";
+    }
+    
+    // Add this object to seen map
+    seen.set(obj, true);
+    
+    // Handle arrays
+    if (Array.isArray(obj)) {
+      return obj.map(item => dataMiddleware._sanitizeObject(item, sensitiveFields, seen));
+    }
+    
+    // Handle Mongoose documents - convert to plain object first
+    const objToProcess = obj.toObject ? obj.toObject({ getters: true }) : obj;
+    
+    // Handle plain objects
+    const sanitized = {};
+    
+    for (const key in objToProcess) {
+      // Skip sensitive fields
+      if (sensitiveFields.includes(key)) {
+        continue;
+      }
+      
+      try {
+        // Recursively sanitize nested objects
+        if (objToProcess[key] && typeof objToProcess[key] === 'object') {
+          sanitized[key] = dataMiddleware._sanitizeObject(objToProcess[key], sensitiveFields, seen);
+        } else {
+          sanitized[key] = objToProcess[key];
+        }
+      } catch (error) {
+        // If processing a specific field fails, skip it
+        console.error(`Error sanitizing field ${key}:`, error);
+        sanitized[key] = "[Error: Unable to sanitize]";
+      }
+    }
+    
+    return sanitized;
+  },
+
+  /**
    * Transform request data before it reaches controllers
    * @param {Function} transformFn - Function to transform request data
    * @returns {Function} Middleware function
@@ -165,64 +226,6 @@ const dataMiddleware = {
       
       next();
     };
-  },
-  
-  /**
-   * Helper function to recursively sanitize objects
-   * @param {Object} obj - Object to sanitize
-   * @param {Array} sensitiveFields - Fields to remove
-   * @param {WeakMap} seen - Map of already processed objects to prevent circular references
-   * @returns {Object} Sanitized object
-   * @private
-   */
-  _sanitizeObject: (obj, sensitiveFields, seen = new WeakMap()) => {
-    // Handle null or non-objects
-    if (!obj || typeof obj !== 'object') {
-      return obj;
-    }
-    
-    // Handle Date objects
-    if (obj instanceof Date) {
-      return new Date(obj);
-    }
-    
-    // Detect circular references
-    if (seen.has(obj)) {
-      return "[Circular Reference]";
-    }
-    
-    // Add this object to seen map
-    seen.set(obj, true);
-    
-    // Handle arrays
-    if (Array.isArray(obj)) {
-      return obj.map(item => dataMiddleware._sanitizeObject(item, sensitiveFields, seen));
-    }
-    
-    // Handle objects
-    const sanitized = {};
-    
-    for (const key in obj) {
-      // Skip sensitive fields
-      if (sensitiveFields.includes(key)) {
-        continue;
-      }
-      
-      try {
-        // Recursively sanitize nested objects
-        if (obj[key] && typeof obj[key] === 'object') {
-          sanitized[key] = dataMiddleware._sanitizeObject(obj[key], sensitiveFields, seen);
-        } else {
-          sanitized[key] = obj[key];
-        }
-      } catch (error) {
-        // If processing a specific field fails, skip it
-        console.error(`Error sanitizing field ${key}:`, error);
-        sanitized[key] = "[Error: Unable to sanitize]";
-      }
-    }
-    
-    return sanitized;
   },
   
   /**

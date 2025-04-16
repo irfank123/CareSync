@@ -153,21 +153,39 @@ const deleteDoctor = async (req, res, next, { doctorService }) => {
  * @access  Private (Doctor)
  */
 const getMyProfile = async (req, res, next, { doctorService }) => {
-  // Check if user is a doctor
-  if (req.userRole !== 'doctor') {
-    return next(new AppError('Only doctors can access this endpoint', 403));
+  try {
+    // Check if user is a doctor
+    if (!req.user) {
+      return next(new AppError('Authentication required', 401));
+    }
+    
+    if (req.userRole !== 'doctor') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only doctors can access this endpoint'
+      });
+    }
+    
+    const doctor = await doctorService.getByUserId(req.user._id);
+    
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Doctor profile not found'
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: doctor
+    });
+  } catch (error) {
+    console.error('Get doctor profile error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error while fetching doctor profile'
+    });
   }
-  
-  const doctor = await doctorService.getByUserId(req.user._id);
-  
-  if (!doctor) {
-    return next(new AppError('Doctor profile not found', 404));
-  }
-  
-  res.status(200).json({
-    success: true,
-    data: doctor
-  });
 };
 
 /**

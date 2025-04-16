@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   Box,
@@ -25,6 +25,8 @@ import {
   TableHead,
   TableRow,
   Paper,
+  CircularProgress,
+  Alert,
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import {
@@ -39,85 +41,101 @@ import {
   Cancel,
   Schedule,
 } from '@mui/icons-material';
+import { appointmentService, patientService, doctorService } from '../services/api';
 
 const Dashboard = () => {
   const { user } = useAuth();
   const [selectedTab, setSelectedTab] = useState(0);
-  // Temporarily force doctor view for testing
-  const isDoctor = false; // Change this to false to see patient view
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [dashboardData, setDashboardData] = useState({
+    stats: {},
+    appointments: [],
+    patients: [],
+    tasks: []
+  });
 
-  // Mock data for doctor's dashboard
-  const doctorStats = {
-    appointments: 12,
-    patients: 45,
-    upcomingToday: 5,
-    pendingReviews: 3,
+  // Determine user role
+  const userRole = user?.role || 'patient';
+  const isDoctor = userRole === 'doctor';
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      setLoading(true);
+      setError(null);
+      
+      try {
+        // Fetch upcoming appointments
+        const appointmentsData = await appointmentService.getUpcoming();
+        
+        // Different stats based on role
+        let stats = {};
+        let patients = [];
+        
+        if (isDoctor) {
+          // For doctors
+          const doctorProfile = await doctorService.getProfile();
+          stats = {
+            appointments: appointmentsData.count || 0,
+            patients: doctorProfile.patientCount || 0,
+            upcomingToday: appointmentsData.data.filter(apt => 
+              new Date(apt.date).toDateString() === new Date().toDateString()
+            ).length,
+            pendingReviews: 0 // This would come from another endpoint
+          };
+          
+          // Get recent patients if needed
+          // This is a placeholder since we don't have a direct endpoint for this
+          patients = [];
+        } else {
+          // For patients
+          const patientProfile = await patientService.getProfile();
+          stats = {
+            upcomingAppointments: appointmentsData.count || 0,
+            prescriptions: patientProfile.prescriptionsCount || 0,
+            testResults: patientProfile.testResultsCount || 0,
+            notifications: 0 // This would come from another endpoint
+          };
+        }
+        
+        setDashboardData({
+          stats,
+          appointments: appointmentsData.data || [],
+          patients,
+          tasks: [] // Placeholder for tasks which would come from another endpoint
+        });
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+        setError('Failed to load dashboard data. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchDashboardData();
+  }, [isDoctor]);
+
+  const getStatusChip = (status) => {
+    const statusConfig = {
+      upcoming: { color: 'primary', icon: <Schedule sx={{ fontSize: 16 }} /> },
+      scheduled: { color: 'primary', icon: <Schedule sx={{ fontSize: 16 }} /> },
+      completed: { color: 'success', icon: <CheckCircle sx={{ fontSize: 16 }} /> },
+      cancelled: { color: 'error', icon: <Cancel sx={{ fontSize: 16 }} /> },
+      'in-progress': { color: 'warning', icon: <AccessTime sx={{ fontSize: 16 }} /> },
+      'no-show': { color: 'error', icon: <Cancel sx={{ fontSize: 16 }} /> },
+    };
+
+    const config = statusConfig[status] || statusConfig.upcoming;
+
+    return (
+      <Chip
+        size="small"
+        icon={config.icon}
+        label={status.charAt(0).toUpperCase() + status.slice(1).replace(/-/g, ' ')}
+        color={config.color}
+      />
+    );
   };
-
-  const patientStats = {
-    upcomingAppointments: 2,
-    prescriptions: 3,
-    testResults: 1,
-    notifications: 2,
-  };
-
-  const todayAppointments = [
-    {
-      id: 1,
-      time: '10:00 AM',
-      patient: 'John Doe',
-      type: 'General Checkup',
-      status: 'upcoming',
-    },
-    {
-      id: 2,
-      time: '11:30 AM',
-      patient: 'Jane Smith',
-      type: 'Follow-up',
-      status: 'completed',
-    },
-    {
-      id: 3,
-      time: '2:00 PM',
-      patient: 'Alice Johnson',
-      type: 'Consultation',
-      status: 'upcoming',
-    },
-  ];
-
-  const recentPatients = [
-    {
-      id: 1,
-      name: 'John Doe',
-      lastVisit: '2024-03-15',
-      condition: 'Hypertension',
-      nextAppointment: '2024-03-20',
-    },
-    {
-      id: 2,
-      name: 'Jane Smith',
-      lastVisit: '2024-03-14',
-      condition: 'Diabetes Type 2',
-      nextAppointment: '2024-03-28',
-    },
-  ];
-
-  const pendingTasks = [
-    {
-      id: 1,
-      type: 'Medical Report',
-      patient: 'John Doe',
-      dueDate: '2024-03-20',
-      priority: 'high',
-    },
-    {
-      id: 2,
-      type: 'Prescription Renewal',
-      patient: 'Alice Johnson',
-      dueDate: '2024-03-21',
-      priority: 'medium',
-    },
-  ];
 
   const doctorQuickActions = [
     {
@@ -173,30 +191,11 @@ const Dashboard = () => {
     },
   ];
 
-  const getStatusChip = (status) => {
-    const statusConfig = {
-      upcoming: { color: 'primary', icon: <Schedule sx={{ fontSize: 16 }} /> },
-      completed: { color: 'success', icon: <CheckCircle sx={{ fontSize: 16 }} /> },
-      cancelled: { color: 'error', icon: <Cancel sx={{ fontSize: 16 }} /> },
-    };
-
-    const config = statusConfig[status] || statusConfig.upcoming;
-
-    return (
-      <Chip
-        size="small"
-        icon={config.icon}
-        label={status.charAt(0).toUpperCase() + status.slice(1)}
-        color={config.color}
-      />
-    );
-  };
-
   const renderDoctorDashboard = () => (
     <>
       {/* Statistics Section */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        {Object.entries(doctorStats).map(([key, value], index) => (
+        {Object.entries(dashboardData.stats).map(([key, value], index) => (
           <Grid item xs={12} sm={6} md={3} key={index}>
             <Card>
               <CardContent>
@@ -235,24 +234,32 @@ const Dashboard = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {todayAppointments.map((appointment) => (
-                <TableRow key={appointment.id}>
-                  <TableCell>{appointment.time}</TableCell>
-                  <TableCell>{appointment.patient}</TableCell>
-                  <TableCell>{appointment.type}</TableCell>
-                  <TableCell>{getStatusChip(appointment.status)}</TableCell>
-                  <TableCell>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      component={RouterLink}
-                      to={`/appointments/${appointment.id}`}
-                    >
-                      View Details
-                    </Button>
+              {dashboardData.appointments.length > 0 ? (
+                dashboardData.appointments.map((appointment) => (
+                  <TableRow key={appointment._id}>
+                    <TableCell>{appointment.startTime}</TableCell>
+                    <TableCell>{appointment.patientName || 'Patient Name'}</TableCell>
+                    <TableCell>{appointment.type}</TableCell>
+                    <TableCell>{getStatusChip(appointment.status)}</TableCell>
+                    <TableCell>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        component={RouterLink}
+                        to={`/appointments/${appointment._id}`}
+                      >
+                        View Details
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">
+                    No appointments scheduled for today
                   </TableCell>
                 </TableRow>
-              ))}
+              )}
             </TableBody>
           </Table>
         </TableContainer>
@@ -272,24 +279,32 @@ const Dashboard = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {recentPatients.map((patient) => (
-                <TableRow key={patient.id}>
-                  <TableCell>{patient.name}</TableCell>
-                  <TableCell>{patient.lastVisit}</TableCell>
-                  <TableCell>{patient.condition}</TableCell>
-                  <TableCell>{patient.nextAppointment}</TableCell>
-                  <TableCell>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      component={RouterLink}
-                      to={`/patients/${patient.id}`}
-                    >
-                      View Profile
-                    </Button>
+              {dashboardData.patients.length > 0 ? (
+                dashboardData.patients.map((patient) => (
+                  <TableRow key={patient._id}>
+                    <TableCell>{patient.name}</TableCell>
+                    <TableCell>{patient.lastVisit}</TableCell>
+                    <TableCell>{patient.condition}</TableCell>
+                    <TableCell>{patient.nextAppointment}</TableCell>
+                    <TableCell>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        component={RouterLink}
+                        to={`/patients/${patient._id}`}
+                      >
+                        View Profile
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">
+                    No recent patients
                   </TableCell>
                 </TableRow>
-              ))}
+              )}
             </TableBody>
           </Table>
         </TableContainer>
@@ -309,29 +324,37 @@ const Dashboard = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {pendingTasks.map((task) => (
-                <TableRow key={task.id}>
-                  <TableCell>{task.type}</TableCell>
-                  <TableCell>{task.patient}</TableCell>
-                  <TableCell>{task.dueDate}</TableCell>
-                  <TableCell>
-                    <Chip
-                      size="small"
-                      label={task.priority}
-                      color={task.priority === 'high' ? 'error' : 'warning'}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      size="small"
-                      variant="contained"
-                      onClick={() => {}}
-                    >
-                      Complete
-                    </Button>
+              {dashboardData.tasks.length > 0 ? (
+                dashboardData.tasks.map((task) => (
+                  <TableRow key={task.id}>
+                    <TableCell>{task.type}</TableCell>
+                    <TableCell>{task.patient}</TableCell>
+                    <TableCell>{task.dueDate}</TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={task.priority}
+                        color={task.priority === 'high' ? 'error' : 'warning'}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        onClick={() => {}}
+                      >
+                        Complete
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">
+                    No pending tasks
                   </TableCell>
                 </TableRow>
-              ))}
+              )}
             </TableBody>
           </Table>
         </TableContainer>
@@ -375,7 +398,7 @@ const Dashboard = () => {
     <>
       {/* Statistics Section */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        {Object.entries(patientStats).map(([key, value], index) => (
+        {Object.entries(dashboardData.stats).map(([key, value], index) => (
           <Grid item xs={12} sm={6} md={3} key={index}>
             <Card>
               <CardContent>
@@ -429,41 +452,50 @@ const Dashboard = () => {
       </Typography>
       <Card sx={{ mb: 4 }}>
         <List>
-          {todayAppointments.map((appointment, index) => (
-            <React.Fragment key={appointment.id}>
-              <ListItem alignItems="flex-start">
-                <ListItemAvatar>
-                  <Avatar>
-                    <AccessTime />
-                  </Avatar>
-                </ListItemAvatar>
-                <ListItemText
-                  primary={
-                    <Typography variant="subtitle1">
-                      {appointment.type}
-                    </Typography>
-                  }
-                  secondary={
-                    <>
-                      <Typography component="span" variant="body2" color="text.primary">
-                        {appointment.time}
+          {dashboardData.appointments.length > 0 ? (
+            dashboardData.appointments.map((appointment, index) => (
+              <React.Fragment key={appointment._id}>
+                <ListItem alignItems="flex-start">
+                  <ListItemAvatar>
+                    <Avatar>
+                      <AccessTime />
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={
+                      <Typography variant="subtitle1">
+                        {appointment.type}
                       </Typography>
-                      {` with Dr. ${appointment.doctor}`}
-                    </>
-                  }
-                />
-                <Button
-                  variant="outlined"
-                  size="small"
-                  component={RouterLink}
-                  to={`/appointments/${appointment.id}`}
-                >
-                  View Details
-                </Button>
-              </ListItem>
-              {index < todayAppointments.length - 1 && <Divider variant="inset" component="li" />}
-            </React.Fragment>
-          ))}
+                    }
+                    secondary={
+                      <>
+                        <Typography component="span" variant="body2" color="text.primary">
+                          {appointment.startTime} on {new Date(appointment.date).toLocaleDateString()}
+                        </Typography>
+                        {` with ${appointment.doctorName || 'Doctor'}`}
+                      </>
+                    }
+                  />
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    component={RouterLink}
+                    to={`/appointments/${appointment._id}`}
+                  >
+                    View Details
+                  </Button>
+                </ListItem>
+                {index < dashboardData.appointments.length - 1 && <Divider variant="inset" component="li" />}
+              </React.Fragment>
+            ))
+          ) : (
+            <ListItem>
+              <ListItemText 
+                primary="No upcoming appointments" 
+                secondary="Click 'Book Appointment' to schedule one"
+              />
+            </ListItem>
+          )}
         </List>
       </Card>
     </>
@@ -472,15 +504,25 @@ const Dashboard = () => {
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Typography variant="h4" component="h1" gutterBottom>
-        Welcome, {user?.name || 'User'}!
+        Welcome, {user?.firstName || 'User'}!
       </Typography>
       <Typography variant="subtitle1" color="text.secondary" paragraph>
         {isDoctor ? 'Here\'s your practice overview' : 'Here\'s your health overview'}
       </Typography>
 
-      {isDoctor ? renderDoctorDashboard() : renderPatientDashboard()}
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
+          <CircularProgress />
+        </Box>
+      ) : error ? (
+        <Alert severity="error" sx={{ my: 2 }}>
+          {error}
+        </Alert>
+      ) : (
+        isDoctor ? renderDoctorDashboard() : renderPatientDashboard()
+      )}
     </Container>
   );
 };
 
-export default Dashboard; 
+export default Dashboard;

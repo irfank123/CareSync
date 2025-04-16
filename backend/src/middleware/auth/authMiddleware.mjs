@@ -31,6 +31,7 @@ const authMiddleware = {
     return null;
   },
 
+
   /**
    * Middleware to authenticate users using JWT
    * @param {Object} req - Express request object
@@ -134,7 +135,7 @@ const authMiddleware = {
         
         // Add user to request
         req.user = user;
-        req.userRole = user.role;
+        req.userRole = user.role || 'patient'; // Default to patient if role is missing
         req.userType = 'user';
         
         // If this is a clinic admin, add clinic information

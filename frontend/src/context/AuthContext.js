@@ -10,65 +10,97 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  // Check for token expiration and refresh if needed
+  // Initialize auth context from localStorage on component mount
   useEffect(() => {
-    const checkAuth = async () => {
+    const initAuth = async () => {
       try {
         const token = localStorage.getItem('token');
         if (token) {
+          // Try to set the user from localStorage first for immediate display
+          const storedUser = JSON.parse(localStorage.getItem('user'));
+          if (storedUser) {
+            console.log('Setting user from localStorage');
+            setUser(storedUser);
+          }
+          
           // Check if token is expired
           const tokenData = JSON.parse(atob(token.split('.')[1]));
           const expirationTime = tokenData.exp * 1000; // Convert to milliseconds
           
           if (expirationTime < Date.now()) {
+            console.log('Token expired, attempting to refresh');
             // Token expired, try to refresh
             try {
-              await authService.refreshToken();
+              const refreshResult = await authService.refreshToken();
+              console.log('Token refresh result:', refreshResult);
+              
+              if (!refreshResult.success) {
+                console.log('Token refresh failed, logging out');
+                await logout();
+              }
             } catch (error) {
+              console.error('Error refreshing token:', error);
               // If refresh fails, logout
-              await authService.logout();
-              navigate('/login');
-              return;
+              await logout();
+            }
+          } else {
+            console.log('Token valid, fetching current user');
+            // Token still valid, try to get fresh user data
+            try {
+              const userProfile = await authService.getProfile();
+              if (userProfile && userProfile.user) {
+                console.log('User profile fetched successfully');
+                setUser(userProfile.user);
+                localStorage.setItem('user', JSON.stringify(userProfile.user));
+              }
+            } catch (profileError) {
+              console.error('Error fetching user profile:', profileError);
+              // Non-fatal - we already have user from localStorage
             }
           }
-          
-          // Get user data
-          const storedUser = JSON.parse(localStorage.getItem('user'));
-          if (storedUser) {
-            setUser(storedUser);
-          }
+        } else {
+          console.log('No token found in localStorage');
         }
       } catch (error) {
-        console.error('Auth check error:', error);
-        await authService.logout();
-        navigate('/login');
+        console.error('Auth initialization error:', error);
+        await logout();
       } finally {
         setLoading(false);
       }
     };
 
-    checkAuth();
+    initAuth();
   }, [navigate]);
 
   const login = async (credentials) => {
     try {
       setLoading(true);
+      console.log('AuthContext login called with email:', credentials.email);
+      
       const response = await authService.login(credentials);
+      console.log('Login response in AuthContext:', response);
       
       if (response.success) {
-        setUser(response.user);
-        toast.success('Login successful!');
-        navigate('/dashboard');
-        return { success: true };
-      } else if (response.requiresMfa) {
-        return { success: true, requiresMfa: true };
+        if (response.requiresMfa) {
+          console.log('MFA required, returning to Login component');
+          return { success: true, requiresMfa: true };
+        }
+        
+        if (response.token && response.user) {
+          console.log('Setting user in context:', response.user);
+          setUser(response.user);
+          return { success: true };
+        } else {
+          console.warn('Login successful but missing token or user data:', response);
+          return { success: false, error: 'Login successful but missing data' };
+        }
       } else {
-        toast.error(response.message || 'Login failed');
-        return { success: false, error: response.message };
+        console.warn('Login failed:', response.message);
+        return { success: false, error: response.message || 'Login failed' };
       }
     } catch (error) {
-      const errorMessage = error.response?.data?.message || 'An error occurred during login';
-      toast.error(errorMessage);
+      console.error('Login error in AuthContext:', error);
+      const errorMessage = error.response?.data?.message || 'Login failed';
       return { success: false, error: errorMessage };
     } finally {
       setLoading(false);
@@ -80,18 +112,15 @@ export const AuthProvider = ({ children }) => {
       setLoading(true);
       const response = await authService.register(userData);
       
-      if (response.success) {
+      if (response.success && response.token && response.user) {
         setUser(response.user);
-        toast.success('Registration successful!');
-        navigate('/dashboard');
         return { success: true };
       } else {
-        toast.error(response.message || 'Registration failed');
-        return { success: false, error: response.message };
+        return { success: false, error: response.message || 'Registration failed' };
       }
     } catch (error) {
-      const errorMessage = error.response?.data?.message || 'An error occurred during registration';
-      toast.error(errorMessage);
+      console.error('Registration error:', error);
+      const errorMessage = error.response?.data?.message || 'Registration failed';
       return { success: false, error: errorMessage };
     } finally {
       setLoading(false);
@@ -103,17 +132,15 @@ export const AuthProvider = ({ children }) => {
       setLoading(true);
       await authService.logout();
       setUser(null);
-      toast.info('You have been logged out');
-      navigate('/login');
     } catch (error) {
       console.error('Logout error:', error);
-      // Still clear local state even if server logout fails
+    } finally {
+      setLoading(false);
+      // Even on error, clear local state
       setUser(null);
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       navigate('/login');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -122,18 +149,15 @@ export const AuthProvider = ({ children }) => {
       setLoading(true);
       const response = await authService.verifyMfa(email, mfaCode);
       
-      if (response.success) {
+      if (response.success && response.token && response.user) {
         setUser(response.user);
-        toast.success('MFA verification successful!');
-        navigate('/dashboard');
         return { success: true };
       } else {
-        toast.error(response.message || 'MFA verification failed');
-        return { success: false, error: response.message };
+        return { success: false, error: response.message || 'MFA verification failed' };
       }
     } catch (error) {
-      const errorMessage = error.response?.data?.message || 'An error occurred during MFA verification';
-      toast.error(errorMessage);
+      console.error('MFA verification error:', error);
+      const errorMessage = error.response?.data?.message || 'MFA verification failed';
       return { success: false, error: errorMessage };
     } finally {
       setLoading(false);
@@ -141,8 +165,9 @@ export const AuthProvider = ({ children }) => {
   };
 
   const updateUserProfile = (updatedData) => {
-    setUser(prev => ({ ...prev, ...updatedData }));
-    localStorage.setItem('user', JSON.stringify({ ...user, ...updatedData }));
+    const updatedUser = { ...user, ...updatedData };
+    setUser(updatedUser);
+    localStorage.setItem('user', JSON.stringify(updatedUser));
   };
 
   const value = {
@@ -158,7 +183,7 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 };
@@ -171,4 +196,4 @@ export const useAuth = () => {
   return context;
 };
 
-export default AuthContext; 
+export default AuthContext;

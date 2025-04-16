@@ -14,9 +14,11 @@ import {
 } from '@mui/material';
 import { toast } from 'react-toastify';
 import { authService } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
   const navigate = useNavigate();
+  const { login: authLogin } = useAuth();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -54,7 +56,7 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
-
+  
     setIsLoading(true);
     try {
       // Add exponential backoff delay if there were previous failed attempts
@@ -62,22 +64,45 @@ const Login = () => {
         const delay = Math.min(1000 * Math.pow(2, loginAttempts - 1), 30000);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
-
-      const response = await authService.login({
+  
+      // Create the credentials object from the formData
+      const credentials = {
         email: formData.email,
         password: formData.password,
         ...(mfaRequired && { mfaCode: formData.mfaCode })
-      });
+      };
+  
+      console.log('Sending login request with email:', formData.email);
       
-      if (response.success) {
+      const response = await authService.login(credentials);
+      
+      console.log('Login response:', response);
+      
+      // Handle the login response based on what your backend is actually returning
+      if (response && response.success) {
+        // If login is successful, we don't need to check for token specifically
+        // Just store user data and navigate to dashboard
+        localStorage.setItem('user', JSON.stringify(response.user));
+        
         toast.success('Login successful!');
-        navigate('/dashboard');
-      } else if (response.requiresMfa && !mfaRequired) {
+        
+        // Navigate to dashboard with a slight delay to allow state updates
+        setTimeout(() => {
+          navigate('/dashboard');
+        }, 100);
+      } else if (response && response.requiresMfa && !mfaRequired) {
+        // Handle MFA requirement
         setMfaRequired(true);
         setMfaCodeSent(true);
         toast.info('MFA code has been sent to your email');
+      } else {
+        // Handle unsuccessful login
+        console.error('Unsuccessful login response:', response);
+        setErrorMessage(response.message || 'Login failed. Please try again.');
       }
     } catch (error) {
+      // Handle error cases as before
+      console.error('Login error:', error);
       setLoginAttempts(prev => prev + 1);
       
       if (error.response) {
@@ -98,12 +123,12 @@ const Login = () => {
         setErrorMessage('Network error. Please check your connection and try again.');
       }
       
-      toast.error(errorMessage);
+      toast.error(errorMessage || 'Login failed');
     } finally {
       setIsLoading(false);
     }
   };
-
+  
   return (
     <Container component="main" maxWidth="xs">
       <Box
@@ -205,4 +230,4 @@ const Login = () => {
   );
 };
 
-export default Login; 
+export default Login;
