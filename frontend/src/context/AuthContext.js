@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { authService } from '../services/api';
 
@@ -9,6 +9,10 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // List of public routes that don't require authentication
+  const publicRoutes = ['/', '/login', '/register', '/forgot-password'];
 
   // Check for token expiration and refresh if needed
   useEffect(() => {
@@ -36,6 +40,14 @@ export const AuthProvider = ({ children }) => {
           const storedUser = JSON.parse(localStorage.getItem('user'));
           if (storedUser) {
             setUser(storedUser);
+            // Only redirect to dashboard if on a public route
+            if (publicRoutes.includes(location.pathname)) {
+              if (storedUser.role === 'doctor') {
+                navigate('/doctor-dashboard');
+              } else {
+                navigate('/dashboard');
+              }
+            }
           }
         }
       } catch (error) {
@@ -48,7 +60,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     checkAuth();
-  }, [navigate]);
+  }, [navigate, location.pathname]);
 
   const login = async (credentials) => {
     try {
@@ -58,7 +70,12 @@ export const AuthProvider = ({ children }) => {
       if (response.success) {
         setUser(response.user);
         toast.success('Login successful!');
-        navigate('/dashboard');
+        // Navigate based on user role
+        if (response.user.role === 'doctor') {
+          navigate('/doctor-dashboard');
+        } else {
+          navigate('/dashboard');
+        }
         return { success: true };
       } else if (response.requiresMfa) {
         return { success: true, requiresMfa: true };
@@ -83,7 +100,12 @@ export const AuthProvider = ({ children }) => {
       if (response.success) {
         setUser(response.user);
         toast.success('Registration successful!');
-        navigate('/dashboard');
+        // Navigate based on user role
+        if (response.user.role === 'doctor') {
+          navigate('/doctor-dashboard');
+        } else {
+          navigate('/dashboard');
+        }
         return { success: true };
       } else {
         toast.error(response.message || 'Registration failed');
@@ -125,7 +147,12 @@ export const AuthProvider = ({ children }) => {
       if (response.success) {
         setUser(response.user);
         toast.success('MFA verification successful!');
-        navigate('/dashboard');
+        // Navigate based on user role
+        if (response.user.role === 'doctor') {
+          navigate('/doctor-dashboard');
+        } else {
+          navigate('/dashboard');
+        }
         return { success: true };
       } else {
         toast.error(response.message || 'MFA verification failed');
