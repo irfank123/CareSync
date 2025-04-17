@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -17,13 +17,19 @@ import {
   Grid,
   Card,
   CardContent,
-  CardActions,
+  Typography as MuiTypography,
   TextField,
   Alert,
+  CircularProgress,
 } from '@mui/material';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { format } from 'date-fns';
+import axios from 'axios';
+import { useAuth } from '../context/AuthContext';
+import { toast } from 'react-toastify';
+
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 const steps = [
   'Select Appointment Type',
@@ -33,42 +39,21 @@ const steps = [
   'Confirm Details',
 ];
 
-// Mock data - replace with API calls
 const appointmentTypes = [
   { id: 'in-person', label: 'In-Person Visit', description: 'Face-to-face consultation at the clinic' },
   { id: 'virtual', label: 'Virtual Consultation', description: 'Online video consultation' },
 ];
 
-const mockDoctors = [
-  {
-    id: 1,
-    name: 'Dr. Sarah Wilson',
-    specialty: 'General Physician',
-    availability: '9 AM - 5 PM',
-    image: 'https://via.placeholder.com/150',
-  },
-  {
-    id: 2,
-    name: 'Dr. Michael Chen',
-    specialty: 'Cardiologist',
-    availability: '10 AM - 6 PM',
-    image: 'https://via.placeholder.com/150',
-  },
-];
-
-const timeSlots = [
-  '09:00 AM', '09:30 AM', '10:00 AM', '10:30 AM',
-  '11:00 AM', '11:30 AM', '02:00 PM', '02:30 PM',
-  '03:00 PM', '03:30 PM', '04:00 PM', '04:30 PM',
-];
-
 const ScheduleAppointment = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [activeStep, setActiveStep] = useState(0);
   const [appointmentType, setAppointmentType] = useState('');
   const [selectedDoctor, setSelectedDoctor] = useState(null);
+  const [doctors, setDoctors] = useState([]);
   const [selectedDate, setSelectedDate] = useState(null);
-  const [selectedTime, setSelectedTime] = useState('');
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
+  const [timeSlots, setTimeSlots] = useState([]);
   const [assessment, setAssessment] = useState({
     symptoms: '',
     duration: '',
@@ -76,6 +61,67 @@ const ScheduleAppointment = () => {
     additionalNotes: '',
   });
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [loadingTimeSlots, setLoadingTimeSlots] = useState(false);
+
+  // Fetch doctors when component mounts
+  useEffect(() => {
+    const fetchDoctors = async () => {
+      setLoading(true);
+      try {
+        const response = await axios.get(`${API_URL}/doctors`);
+        if (response.data && response.data.data) {
+          setDoctors(response.data.data);
+        }
+      } catch (err) {
+        console.error('Error fetching doctors:', err);
+        setError('Failed to load doctors. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDoctors();
+  }, []);
+
+  // Fetch available time slots when doctor and date are selected
+  useEffect(() => {
+    const fetchTimeSlots = async () => {
+      if (!selectedDoctor || !selectedDate) return;
+      
+      setLoadingTimeSlots(true);
+      setTimeSlots([]);
+      try {
+        const formattedDate = format(selectedDate, 'yyyy-MM-dd');
+        const response = await axios.get(
+          `${API_URL}/availability/doctor/${selectedDoctor._id}/slots/available?date=${formattedDate}`
+        );
+        
+        if (response.data && response.data.data) {
+          setTimeSlots(response.data.data);
+        }
+      } catch (err) {
+        console.error('Error fetching time slots:', err);
+        setError('Failed to load available time slots. Please try again later.');
+      } finally {
+        setLoadingTimeSlots(false);
+      }
+    };
+
+    if (selectedDoctor && selectedDate) {
+      fetchTimeSlots();
+    }
+  }, [selectedDoctor, selectedDate]);
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token');
+    return {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    };
+  };
 
   const handleNext = () => {
     if (validateCurrentStep()) {
@@ -104,8 +150,8 @@ const ScheduleAppointment = () => {
         }
         break;
       case 2:
-        if (!selectedDate || !selectedTime) {
-          setError('Please select both date and time');
+        if (!selectedDate || !selectedTimeSlot) {
+          setError('Please select both date and time slot');
           return false;
         }
         break;
@@ -123,21 +169,50 @@ const ScheduleAppointment = () => {
 
   const handleSubmit = async () => {
     try {
-      // API call to create appointment
-      console.log('Submitting appointment:', {
-        type: appointmentType,
-        doctorId: selectedDoctor?.id,
-        date: selectedDate,
-        time: selectedTime,
-        assessment,
-      });
+      setLoading(true);
       
-      // Mock success - replace with actual API call
-      navigate('/dashboard', {
-        state: { message: 'Appointment scheduled successfully!' }
-      });
+      // Get patient ID from user object
+      let patientId;
+      if (user.role === 'patient' && user.roleData && user.roleData._id) {
+        patientId = user.roleData._id;
+      } else {
+        // Fetch patient profile if not available in user object
+        const patientResponse = await axios.get(`${API_URL}/patients/me`, getAuthHeaders());
+        patientId = patientResponse.data.data._id;
+      }
+      
+      // Prepare appointment data
+      const appointmentData = {
+        patientId,
+        doctorId: selectedDoctor._id,
+        timeSlotId: selectedTimeSlot._id,
+        type: appointmentType,
+        isVirtual: appointmentType === 'virtual',
+        reasonForVisit: assessment.symptoms,
+        notes: `Duration: ${assessment.duration}, Severity: ${assessment.severity || 'Not specified'}, Additional notes: ${assessment.additionalNotes || 'None'}`
+      };
+      
+      console.log('Submitting appointment:', appointmentData);
+      
+      // Create appointment via API
+      const response = await axios.post(
+        `${API_URL}/appointments`, 
+        appointmentData, 
+        getAuthHeaders()
+      );
+      
+      if (response.data && response.data.success) {
+        toast.success('Appointment scheduled successfully!');
+        navigate('/appointments');
+      } else {
+        throw new Error('Failed to create appointment');
+      }
     } catch (error) {
+      console.error('Create appointment error:', error);
       setError('Failed to schedule appointment. Please try again.');
+      toast.error('Failed to schedule appointment. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -175,37 +250,43 @@ const ScheduleAppointment = () => {
       case 1:
         return (
           <Box sx={{ mt: 3 }}>
-            <Grid container spacing={3}>
-              <Grid item xs={12}>
-                <Button
-                  fullWidth
-                  variant={!selectedDoctor ? 'contained' : 'outlined'}
-                  onClick={() => setSelectedDoctor(null)}
-                >
-                  Any Available Doctor
-                </Button>
+            {loading ? (
+              <Box display="flex" justifyContent="center" mt={3}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <Grid container spacing={3}>
+                {doctors.length === 0 ? (
+                  <Grid item xs={12}>
+                    <Alert severity="info">No doctors available at the moment.</Alert>
+                  </Grid>
+                ) : (
+                  doctors.map((doctor) => (
+                    <Grid item xs={12} sm={6} key={doctor._id}>
+                      <Card
+                        sx={{
+                          cursor: 'pointer',
+                          border: selectedDoctor?._id === doctor._id ? 2 : 0,
+                          borderColor: 'primary.main',
+                          height: '100%',
+                        }}
+                        onClick={() => setSelectedDoctor(doctor)}
+                      >
+                        <CardContent>
+                          <Typography variant="h6">Dr. {doctor.user?.firstName} {doctor.user?.lastName}</Typography>
+                          <Typography color="text.secondary">
+                            {doctor.specialties?.join(', ')}
+                          </Typography>
+                          <Typography variant="body2">
+                            {doctor.acceptingNewPatients ? 'Accepting new patients' : 'Not accepting new patients'}
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  ))
+                )}
               </Grid>
-              {mockDoctors.map((doctor) => (
-                <Grid item xs={12} sm={6} key={doctor.id}>
-                  <Card
-                    sx={{
-                      cursor: 'pointer',
-                      border: selectedDoctor?.id === doctor.id ? 2 : 0,
-                      borderColor: 'primary.main',
-                    }}
-                    onClick={() => setSelectedDoctor(doctor)}
-                  >
-                    <CardContent>
-                      <Typography variant="h6">{doctor.name}</Typography>
-                      <Typography color="text.secondary">{doctor.specialty}</Typography>
-                      <Typography variant="body2">
-                        Available: {doctor.availability}
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
+            )}
           </Box>
         );
 
@@ -228,19 +309,31 @@ const ScheduleAppointment = () => {
                 <Typography variant="subtitle1" gutterBottom>
                   Available Time Slots
                 </Typography>
-                <Grid container spacing={1}>
-                  {timeSlots.map((time) => (
-                    <Grid item xs={6} sm={3} key={time}>
-                      <Button
-                        fullWidth
-                        variant={selectedTime === time ? 'contained' : 'outlined'}
-                        onClick={() => setSelectedTime(time)}
-                      >
-                        {time}
-                      </Button>
+                {loadingTimeSlots ? (
+                  <Box display="flex" justifyContent="center" mt={3}>
+                    <CircularProgress />
+                  </Box>
+                ) : (
+                  timeSlots.length === 0 ? (
+                    <Alert severity="info">
+                      {selectedDate ? 'No available time slots for the selected date.' : 'Please select a date to see available time slots.'}
+                    </Alert>
+                  ) : (
+                    <Grid container spacing={1}>
+                      {timeSlots.map((slot) => (
+                        <Grid item xs={6} sm={3} key={slot._id}>
+                          <Button
+                            fullWidth
+                            variant={selectedTimeSlot?._id === slot._id ? 'contained' : 'outlined'}
+                            onClick={() => setSelectedTimeSlot(slot)}
+                          >
+                            {slot.startTime} - {slot.endTime}
+                          </Button>
+                        </Grid>
+                      ))}
                     </Grid>
-                  ))}
-                </Grid>
+                  )
+                )}
               </Grid>
             </Grid>
           </Box>
@@ -312,13 +405,19 @@ const ScheduleAppointment = () => {
                 </Grid>
                 <Grid item xs={12}>
                   <Typography>
-                    <strong>Doctor:</strong> {selectedDoctor ? selectedDoctor.name : 'Any Available Doctor'}
+                    <strong>Doctor:</strong> Dr. {selectedDoctor?.user?.firstName} {selectedDoctor?.user?.lastName}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <Typography>
+                    <strong>Specialties:</strong> {selectedDoctor?.specialties?.join(', ')}
                   </Typography>
                 </Grid>
                 <Grid item xs={12}>
                   <Typography>
                     <strong>Date & Time:</strong>{' '}
-                    {selectedDate && `${format(selectedDate, 'MMMM d, yyyy')} at ${selectedTime}`}
+                    {selectedDate && selectedTimeSlot && 
+                      `${format(selectedDate, 'MMMM d, yyyy')} at ${selectedTimeSlot.startTime} - ${selectedTimeSlot.endTime}`}
                   </Typography>
                 </Grid>
                 <Grid item xs={12}>
@@ -326,6 +425,25 @@ const ScheduleAppointment = () => {
                     <strong>Primary Symptoms:</strong> {assessment.symptoms}
                   </Typography>
                 </Grid>
+                <Grid item xs={12}>
+                  <Typography>
+                    <strong>Duration:</strong> {assessment.duration}
+                  </Typography>
+                </Grid>
+                {assessment.severity && (
+                  <Grid item xs={12}>
+                    <Typography>
+                      <strong>Severity:</strong> {assessment.severity}
+                    </Typography>
+                  </Grid>
+                )}
+                {assessment.additionalNotes && (
+                  <Grid item xs={12}>
+                    <Typography>
+                      <strong>Additional Notes:</strong> {assessment.additionalNotes}
+                    </Typography>
+                  </Grid>
+                )}
               </Grid>
             </Paper>
           </Box>
@@ -361,16 +479,24 @@ const ScheduleAppointment = () => {
 
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
           {activeStep > 0 && (
-            <Button onClick={handleBack} sx={{ mr: 1 }}>
+            <Button onClick={handleBack} sx={{ mr: 1 }} disabled={loading}>
               Back
             </Button>
           )}
           {activeStep === steps.length - 1 ? (
-            <Button variant="contained" onClick={handleSubmit}>
-              Schedule Appointment
+            <Button 
+              variant="contained" 
+              onClick={handleSubmit}
+              disabled={loading}
+            >
+              {loading ? <CircularProgress size={24} /> : 'Schedule Appointment'}
             </Button>
           ) : (
-            <Button variant="contained" onClick={handleNext}>
+            <Button 
+              variant="contained" 
+              onClick={handleNext}
+              disabled={loading}
+            >
               Next
             </Button>
           )}
@@ -380,4 +506,4 @@ const ScheduleAppointment = () => {
   );
 };
 
-export default ScheduleAppointment; 
+export default ScheduleAppointment;
