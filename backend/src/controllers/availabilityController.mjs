@@ -4,6 +4,7 @@ import { validationResult } from 'express-validator';
 import { check } from 'express-validator';
 import availabilityService from '../services/availabilityService.mjs';
 import { asyncHandler, AppError, formatValidationErrors } from '../utils/errorHandler.mjs';
+import mongoose from 'mongoose';
 
 /**
  * @desc    Get time slots for a doctor
@@ -14,22 +15,40 @@ export const getTimeSlots = asyncHandler(async (req, res, next) => {
   const doctorId = req.params.doctorId;
   const { startDate, endDate } = req.query;
   
-  // Parse dates if provided
-  const start = startDate ? new Date(startDate) : null;
-  const end = endDate ? new Date(endDate) : null;
-  
-  // Validate date format
-  if ((startDate && isNaN(start.getTime())) || (endDate && isNaN(end.getTime()))) {
-    return next(new AppError('Invalid date format', 400));
+  // Validate doctorId format for MongoDB ObjectId
+  if (!doctorId || doctorId === '[object Object]' || doctorId === 'undefined') {
+    return next(new AppError('Invalid doctor ID format', 400));
   }
   
-  const timeSlots = await availabilityService.getTimeSlots(doctorId, start, end);
-  
-  res.status(200).json({
-    success: true,
-    count: timeSlots.length,
-    data: timeSlots
-  });
+  try {
+    // Attempt to convert to a valid ObjectId or catch the error
+    const { Types } = mongoose;
+    const validDoctorId = Types.ObjectId.isValid(doctorId) ? doctorId : null;
+    
+    if (!validDoctorId) {
+      return next(new AppError(`Invalid MongoDB ObjectId format: ${doctorId}`, 400));
+    }
+    
+    // Parse dates if provided
+    const start = startDate ? new Date(startDate) : null;
+    const end = endDate ? new Date(endDate) : null;
+    
+    // Validate date format
+    if ((startDate && isNaN(start.getTime())) || (endDate && isNaN(end.getTime()))) {
+      return next(new AppError('Invalid date format', 400));
+    }
+    
+    const timeSlots = await availabilityService.getTimeSlots(validDoctorId, start, end);
+    
+    res.status(200).json({
+      success: true,
+      count: timeSlots.length,
+      data: timeSlots
+    });
+  } catch (error) {
+    console.error('Get time slots error:', error);
+    return next(new AppError(`Failed to retrieve time slots: ${error.message}`, 500));
+  }
 });
 
 /**
@@ -38,25 +57,60 @@ export const getTimeSlots = asyncHandler(async (req, res, next) => {
  * @access  Private/Public (Based on config)
  */
 export const getAvailableTimeSlots = asyncHandler(async (req, res, next) => {
-  const doctorId = req.params.doctorId;
+  const doctorIdentifier = req.params.doctorId;
   const { startDate, endDate } = req.query;
   
-  // Parse dates if provided
-  const start = startDate ? new Date(startDate) : null;
-  const end = endDate ? new Date(endDate) : null;
-  
-  // Validate date format
-  if ((startDate && isNaN(start.getTime())) || (endDate && isNaN(end.getTime()))) {
-    return next(new AppError('Invalid date format', 400));
+  // Validate doctorId format for MongoDB ObjectId or assume it's a license number
+  if (!doctorIdentifier || doctorIdentifier === '[object Object]' || doctorIdentifier === 'undefined') {
+    return next(new AppError('Invalid doctor identifier format', 400));
   }
   
-  const timeSlots = await availabilityService.getAvailableTimeSlots(doctorId, start, end);
-  
-  res.status(200).json({
-    success: true,
-    count: timeSlots.length,
-    data: timeSlots
-  });
+  try {
+    let actualDoctorId = null;
+    const { Types } = mongoose;
+    const { Doctor } = await import('../models/index.mjs');
+
+    // Check if it's a valid ObjectId
+    if (Types.ObjectId.isValid(doctorIdentifier)) {
+      actualDoctorId = doctorIdentifier;
+      // Optionally, verify this doctor ID exists
+      const doctorExists = await Doctor.findById(actualDoctorId);
+      if (!doctorExists) {
+        return next(new AppError('Doctor not found with the provided ID', 404));
+      }
+    } else {
+      // If not a valid ObjectId, assume it's a license number
+      console.log(`Identifier ${doctorIdentifier} is not ObjectId, trying as licenseNumber`);
+      const doctor = await Doctor.findOne({ licenseNumber: doctorIdentifier });
+      
+      if (!doctor) {
+        return next(new AppError('Doctor not found with the provided license number', 404));
+      }
+      actualDoctorId = doctor._id;
+      console.log(`Found doctor with ID ${actualDoctorId} using licenseNumber`);
+    }
+    
+    // Parse dates if provided
+    const start = startDate ? new Date(startDate) : null;
+    const end = endDate ? new Date(endDate) : null;
+    
+    // Validate date format
+    if ((startDate && isNaN(start.getTime())) || (endDate && isNaN(end.getTime()))) {
+      return next(new AppError('Invalid date format', 400));
+    }
+    
+    // Call the service with the actual MongoDB ObjectId
+    const timeSlots = await availabilityService.getAvailableTimeSlots(actualDoctorId, start, end);
+    
+    res.status(200).json({
+      success: true,
+      count: timeSlots.length,
+      data: timeSlots
+    });
+  } catch (error) {
+    console.error('Get available time slots error:', error);
+    return next(new AppError(`Failed to retrieve available time slots: ${error.message}`, 500));
+  }
 });
 
 /**

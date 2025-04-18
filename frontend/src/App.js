@@ -19,6 +19,7 @@ import Patients from './pages/Patients';
 import Profile from './pages/Profile';
 import Settings from './pages/Settings';
 import ManageAvailability from './pages/ManageAvailability';
+import Assessment from './pages/Assessment';
 import NotFound from './pages/NotFound';
 
 // Components
@@ -81,6 +82,14 @@ function App() {
                   element={
                     <ProtectedRoute roles={['doctor', 'patient']}>
                       <AppointmentDetails />
+                    </ProtectedRoute>
+                  } 
+                />
+                <Route 
+                  path="/assessment/:patientId/:appointmentId" 
+                  element={
+                    <ProtectedRoute roles={['patient']}>
+                      <Assessment />
                     </ProtectedRoute>
                   } 
                 />

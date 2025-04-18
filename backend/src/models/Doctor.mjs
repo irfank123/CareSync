@@ -70,7 +70,15 @@ const DoctorSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    toJSON: { virtuals: true },
+    toJSON: { 
+      virtuals: true,
+      transform: function(doc, ret) {
+        // Convert ObjectId to string for proper JSON serialization
+        if (ret._id) ret._id = ret._id.toString();
+        if (ret.userId) ret.userId = ret.userId.toString();
+        return ret;
+      }
+    },
     toObject: { virtuals: true },
   }
 );

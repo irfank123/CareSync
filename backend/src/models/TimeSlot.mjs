@@ -37,7 +37,15 @@ const TimeSlotSchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: true
+    timestamps: true,
+    toJSON: { 
+      transform: function(doc, ret) {
+        // Convert ObjectId to string for proper JSON serialization
+        if (ret._id) ret._id = ret._id.toString();
+        if (ret.doctorId) ret.doctorId = ret.doctorId.toString();
+        return ret;
+      }
+    }
   }
 );
 

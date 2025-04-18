@@ -14,6 +14,9 @@ const api = axios.create({
   timeout: 10000, // 10 seconds timeout
 });
 
+// Export the axios instance for use in other services
+export const axiosInstance = api;
+
 // Add request interceptor for token
 api.interceptors.request.use(
   (config) => {
@@ -166,4 +169,4 @@ export const patientService = {
   getMedicalHistory: (id) => api.get(`/patients/${id}/medical-history`),
 };
 
-export default api; 
+export default api;

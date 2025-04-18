@@ -38,15 +38,15 @@ const AppointmentDetails = () => {
 
   // Mock data - replace with API call
   const appointment = {
-    id: 1,
+    _id: id, // Use the actual ID from params
     doctor: {
-      id: 'dr-wilson',
+      _id: 'doctor123', // MongoDB-compatible ID format
       name: 'Dr. Sarah Wilson',
       specialty: 'General Physician',
       email: 'dr.wilson@caresync.com',
     },
     patient: {
-      id: 'patient-1',
+      _id: user?.id || 'patient123', // Use actual user ID if available
       name: 'John Doe',
       email: 'john.doe@example.com',
       phone: '+1 234 567 8900',
@@ -173,6 +173,16 @@ const AppointmentDetails = () => {
               >
                 Cancel Appointment
               </Button>
+              {!isDoctor && (
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  startIcon={<Notes />}
+                  onClick={() => navigate(`/assessment/${appointment.patient._id}/${appointment._id}`)}
+                >
+                  Start AI Assessment
+                </Button>
+              )}
             </Box>
           )}
         </Grid>

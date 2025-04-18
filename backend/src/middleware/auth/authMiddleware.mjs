@@ -249,6 +249,34 @@ const authMiddleware = {
   },
   
   /**
+   * Middleware to bypass authentication for testing
+   * Sets a mock user with admin role
+   * WARNING: Should only be used in development environment
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next function
+   */
+  bypassAuth: (req, res, next) => {
+    // Create a mock user for testing purposes
+    req.user = {
+      _id: '64a3d2f78b008f15d8e6723c',
+      name: 'Test User',
+      email: 'test@example.com',
+      role: 'admin'
+    };
+    
+    req.userRole = 'admin';
+    req.userType = 'user';
+    
+    // Log that we're bypassing auth (in dev mode only)
+    if (process.env.NODE_ENV === 'development') {
+      console.log('⚠️ WARNING: Authentication bypassed for testing');
+    }
+    
+    next();
+  },
+  
+  /**
    * Middleware to check if MFA is completed
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object
@@ -524,6 +552,16 @@ const authMiddleware = {
     }
     
     next();
+  },
+  
+  /**
+   * Middleware for protecting routes
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next function
+   */
+  protect: async (req, res, next) => {
+    return authMiddleware.authenticate(req, res, next);
   }
 };
 

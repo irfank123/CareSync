@@ -27,6 +27,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { format } from 'date-fns';
 import { API_BASE_URL } from '../config';
+import { extractObjectId } from '../utils/objectIdHelper';
 
 const steps = [
   'Select Appointment Type',
@@ -138,8 +139,32 @@ const ScheduleAppointment = () => {
         setLoading(true);
         const formattedDate = format(selectedDate, 'yyyy-MM-dd');
         
+        console.log('Selected doctor:', selectedDoctor);
+        
+        // Use the rawId we stored during doctor selection
+        let doctorId = selectedDoctor.rawId;
+        
+        // Additional safety check - ensure we have a string
+        if (doctorId && typeof doctorId !== 'string') {
+          console.warn('Doctor ID is not a string:', doctorId);
+          
+          // Try to get a valid string ID
+          if (selectedDoctor.licenseNumber) {
+            doctorId = selectedDoctor.licenseNumber;
+            console.log('Using license number as fallback ID:', doctorId);
+          } else {
+            throw new Error('Could not get a valid string doctor ID');
+          }
+        }
+        
+        if (!doctorId) {
+          throw new Error('Invalid doctor ID');
+        }
+        
+        console.log('Using doctor ID:', doctorId);
+        
         const response = await fetch(
-          `${API_BASE_URL}/availability/doctor/${selectedDoctor._id}/slots/available?startDate=${formattedDate}&endDate=${formattedDate}`,
+          `${API_BASE_URL}/availability/doctor/${doctorId}/slots/available?startDate=${formattedDate}&endDate=${formattedDate}`,
           {
             headers: getAuthHeaders(),
           }
@@ -222,19 +247,71 @@ const ScheduleAppointment = () => {
       }
       
       const patientData = await patientResponse.json();
-      const patientId = patientData.data._id;
+      console.log('Raw patientData.data:', patientData.data);
+      console.log('Raw patientData.data._id type:', typeof patientData.data?._id);
+      if (patientData.data?._id && typeof patientData.data._id === 'object') {
+        console.log('Raw patientData.data._id keys:', Object.keys(patientData.data._id));
+        console.log('Raw patientData.data._id JSON:', JSON.stringify(patientData.data._id));
+      }
+
+      // Correctly extract patientId from the response data
+      const patientId = extractObjectId(patientData.data);
+      
+      if (!patientId) {
+        throw new Error('Failed to extract valid patient ID');
+      }
+      console.log('Extracted patientId:', patientId);
+      
+      // Extract ObjectIds using stored rawId
+      let doctorId = selectedDoctor.rawId;
+      let timeSlotId = selectedTimeSlot.rawId;
+      
+      // Ensure IDs are strings
+      if (doctorId && typeof doctorId !== 'string') {
+        console.warn('Doctor ID is not a string:', doctorId);
+        if (selectedDoctor.licenseNumber) {
+          doctorId = selectedDoctor.licenseNumber;
+          console.log('Converting doctor ID to string using license number:', doctorId);
+        } else {
+          throw new Error('Invalid doctor ID format - not a string');
+        }
+      }
+      
+      if (timeSlotId && typeof timeSlotId !== 'string') {
+        console.warn('Time slot ID is not a string:', timeSlotId);
+        const slotDate = format(new Date(selectedTimeSlot.date), 'yyyy-MM-dd');
+        timeSlotId = `${slotDate}-${selectedTimeSlot.startTime}-${selectedTimeSlot.endTime}`;
+        console.log('Converting time slot ID to string using date and time:', timeSlotId);
+      }
+      
+      if (!doctorId || !timeSlotId) {
+        throw new Error('Invalid doctor or time slot ID');
+      }
+      
+      console.log('Using doctorId:', doctorId);
+      console.log('Using timeSlotId:', timeSlotId);
       
       // Prepare appointment data
+      const mapSeverity = (frontendSeverity) => {
+        switch(frontendSeverity?.toLowerCase()) {
+          case 'mild': return 'low';
+          case 'moderate': return 'medium';
+          case 'severe': return 'high';
+          default: return 'low'; // Default to low if unset or unrecognized
+        }
+      };
+
       const appointmentData = {
         patientId: patientId,
-        doctorId: selectedDoctor._id,
-        timeSlotId: selectedTimeSlot._id,
+        doctorId: doctorId,
+        timeSlotId: timeSlotId,
         type: appointmentType,
         isVirtual: appointmentType === 'virtual',
         reasonForVisit: assessment.symptoms,
         assessment: {
           symptoms: assessment.symptoms,
-          severity: assessment.severity || 'low',
+          // Map the frontend severity to the backend enum value
+          severity: mapSeverity(assessment.severity),
           responses: [
             { question: 'Duration of symptoms', answer: assessment.duration },
             { question: 'Additional notes', answer: assessment.additionalNotes }
@@ -247,12 +324,16 @@ const ScheduleAppointment = () => {
       // Make API call to create appointment
       const response = await fetch(`${API_BASE_URL}/appointments`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: {
+          ...getAuthHeaders(),
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify(appointmentData),
       });
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error('Error response:', errorData);
         throw new Error(errorData.message || 'Failed to schedule appointment');
       }
       
@@ -315,15 +396,41 @@ const ScheduleAppointment = () => {
                     </Typography>
                   </Grid>
                 ) : (
-                  doctors.map((doctor) => (
-                    <Grid item xs={12} sm={6} key={doctor._id}>
+                  doctors.map((doctor, index) => (
+                    <Grid item xs={12} sm={6} key={index}>
                       <Card
                         sx={{
                           cursor: 'pointer',
                           border: selectedDoctor?._id === doctor._id ? 2 : 0,
                           borderColor: 'primary.main',
                         }}
-                        onClick={() => setSelectedDoctor(doctor)}
+                        onClick={() => {
+                          console.log('Raw doctor object:', doctor);
+                          console.log('Raw _id type:', typeof doctor._id);
+                          console.log('Raw _id keys:', doctor._id ? Object.keys(doctor._id) : 'No _id');
+                          
+                          if (doctor._id && typeof doctor._id === 'object') {
+                            console.log('_id object contents:', JSON.stringify(doctor._id));
+                          }
+                          
+                          // For doctors, immediately use license number if available
+                          let objectId = null;
+                          if (doctor._id && doctor._id.buffer) {
+                            console.log('Detected Buffer _id, using licenseNumber directly');
+                            objectId = doctor.licenseNumber;
+                          } else {
+                            // Extract the proper MongoDB ObjectId using utility
+                            objectId = extractObjectId(doctor);
+                          }
+                          
+                          console.log('Extracted ObjectId:', objectId);
+                          
+                          // Set the doctor with the proper ID format
+                          setSelectedDoctor({
+                            ...doctor,
+                            rawId: objectId
+                          });
+                        }}
                       >
                         <CardContent>
                           <Typography variant="h6">
@@ -386,12 +493,48 @@ const ScheduleAppointment = () => {
                   </Typography>
                 ) : (
                   <Grid container spacing={1}>
-                    {availableTimeSlots.map((slot) => (
-                      <Grid item xs={6} sm={3} key={slot._id}>
+                    {availableTimeSlots.map((slot, index) => (
+                      <Grid item xs={6} sm={3} key={index}>
                         <Button
                           fullWidth
                           variant={selectedTimeSlot?._id === slot._id ? 'contained' : 'outlined'}
-                          onClick={() => setSelectedTimeSlot(slot)}
+                          onClick={() => {
+                            console.log('Raw slot object:', slot);
+                            console.log('Raw slot _id type:', typeof slot._id);
+                            console.log('Raw slot _id keys:', slot._id ? Object.keys(slot._id) : 'No _id');
+                            
+                            if (slot._id && typeof slot._id === 'object') {
+                              console.log('Slot _id object contents:', JSON.stringify(slot._id));
+                            }
+                            
+                            // For time slots with Buffer IDs, generate a reliable ID
+                            let objectId = null;
+                            if (slot._id && slot._id.buffer) {
+                              // Generate a reliable ID for the time slot
+                              const slotDate = format(new Date(slot.date), 'yyyy-MM-dd');
+                              objectId = `${slotDate}-${slot.startTime}-${slot.endTime}`;
+                              console.log('Detected Buffer _id, using generated time slot ID:', objectId);
+                            } else {
+                              // Extract the proper MongoDB ObjectId using utility
+                              objectId = extractObjectId(slot);
+                            }
+                            
+                            // If we still couldn't get a valid ID, generate a fallback
+                            if (!objectId) {
+                              // Generate a reliable ID for the time slot
+                              const slotDate = format(new Date(slot.date), 'yyyy-MM-dd');
+                              objectId = `${slotDate}-${slot.startTime}-${slot.endTime}`;
+                              console.log('Using generated fallback slot ID:', objectId);
+                            }
+                            
+                            console.log('Extracted time slot ObjectId:', objectId);
+                            
+                            // Set the time slot with the proper ID format
+                            setSelectedTimeSlot({
+                              ...slot,
+                              rawId: objectId
+                            });
+                          }}
                         >
                           {slot.startTime} - {slot.endTime}
                         </Button>

@@ -270,7 +270,7 @@ class AppointmentService {
       // Use aggregation to get appointment with related data
       const appointment = await Appointment.aggregate([
         {
-          $match: { _id: mongoose.Types.ObjectId(appointmentId) }
+          $match: { _id: new mongoose.Types.ObjectId(appointmentId) }
         },
         {
           $lookup: {
@@ -403,24 +403,49 @@ async createAppointment(appointmentData, userId) {
     const session = await mongoose.startSession();
     session.startTransaction();
     
+    let createdAppointmentId = null;
+    let createdAssessmentId = null;
+
     try {
-      // Validate input data
+      // Validate input data (ensure IDs are ObjectIds before passing here)
       await this._validateAppointmentInputData(appointmentData);
       
-      // Create assessment if provided
-      const assessmentId = await this._createAssessmentIfProvided(appointmentData, session);
-      
-      // Create the appointment
-      const appointment = await this._createAppointmentRecord(
-        appointmentData, assessmentId, session
+      // 1. Create the Appointment record first, without the assessment ID yet
+      const initialAppointmentData = { ...appointmentData };
+      delete initialAppointmentData.assessment; // Remove assessment data for initial creation
+
+      const appointmentResult = await this._createAppointmentRecord(
+        initialAppointmentData, 
+        null, // Pass null for assessmentId initially
+        session
       );
+      createdAppointmentId = appointmentResult[0]._id;
+      console.log(`Created initial appointment with ID: ${createdAppointmentId}`);
+
+      // 2. Create Assessment record IF assessment data was provided
+      if (appointmentData.assessment) {
+        createdAssessmentId = await this._createAssessmentIfProvided(
+          appointmentData, // Pass original data with assessment
+          createdAppointmentId, // Pass the newly created appointment ID
+          session
+        );
+        console.log(`Created assessment with ID: ${createdAssessmentId}`);
+
+        // 3. Update the Appointment with the Assessment ID
+        await Appointment.findByIdAndUpdate(
+          createdAppointmentId,
+          { preliminaryAssessmentId: createdAssessmentId },
+          { session }
+        );
+        console.log(`Updated appointment ${createdAppointmentId} with assessment ID ${createdAssessmentId}`);
+      }
       
       // Update time slot status
       await this._updateTimeSlotStatus(appointmentData.timeSlotId, 'booked', session);
       
       // Create audit log
       await this._createAppointmentAuditLog(
-        userId, appointment[0]._id, appointmentData, session
+        userId, createdAppointmentId, appointmentData, session
       );
       
       // Get patient and doctor for notifications
@@ -430,19 +455,30 @@ async createAppointment(appointmentData, userId) {
       
       // Send notifications
       await this._sendAppointmentNotifications(
-        appointment[0], patient, doctor, 'created', session
+        appointmentResult[0], // Use the initially created appointment object
+        patient, 
+        doctor, 
+        'created', 
+        session
       );
       
       // Commit the transaction
       await session.commitTransaction();
       
       // Get the complete appointment with related data
-      return await this.getAppointmentById(appointment[0]._id);
+      return await this.getAppointmentById(createdAppointmentId);
     } catch (error) {
       // Abort transaction on error
       await session.abortTransaction();
       console.error('Create appointment error:', error);
-      throw new Error(`Failed to create appointment: ${error.message}`);
+      // Add context about which record failed if possible
+      if (error.message.includes('Assessment validation failed') && createdAppointmentId && !createdAssessmentId) {
+         throw new Error(`Failed to create appointment: Error during assessment creation for appointment ${createdAppointmentId}. Details: ${error.message}`);
+      } else if (error.message.includes('Appointment validation failed')) {
+         throw new Error(`Failed to create appointment: Error during appointment record creation. Details: ${error.message}`);
+      } else {
+        throw new Error(`Failed to create appointment: ${error.message}`);
+      }
     } finally {
       session.endSession();
     }
@@ -492,23 +528,29 @@ async createAppointment(appointmentData, userId) {
   
   /**
    * Create assessment record if provided in appointment data
-   * @param {Object} appointmentData - Appointment data
+   * @param {Object} appointmentData - Appointment data containing assessment details
+   * @param {ObjectId} appointmentId - The ID of the already created appointment
    * @param {Object} session - MongoDB session
-   * @returns {string|null} Assessment ID or null
+   * @returns {ObjectId|null} Assessment ID or null
    * @private
    */
-  async _createAssessmentIfProvided(appointmentData, session) {
+  async _createAssessmentIfProvided(appointmentData, appointmentId, session) {
     if (!appointmentData.assessment) {
       return null;
     }
+
+    if (!appointmentId) {
+      throw new Error('Cannot create assessment without a valid appointmentId');
+    }
     
+    // Now we have the appointmentId, include it directly
     const assessment = await Assessment.create([{
       patientId: appointmentData.patientId,
-      appointmentId: null, // Will be updated after appointment creation
+      appointmentId: appointmentId, // Use the provided appointmentId
       symptoms: appointmentData.assessment.symptoms || [],
       responses: appointmentData.assessment.responses || [],
       aiGeneratedReport: appointmentData.assessment.aiGeneratedReport,
-      severity: appointmentData.assessment.severity || 'low',
+      severity: appointmentData.assessment.severity, // Already mapped in frontend
       status: 'completed',
       completionDate: new Date()
     }], { session });
@@ -518,8 +560,8 @@ async createAppointment(appointmentData, userId) {
   
   /**
    * Create the appointment record
-   * @param {Object} appointmentData - Appointment data
-   * @param {string|null} assessmentId - Assessment ID if any
+   * @param {Object} appointmentData - Appointment data (WITHOUT assessment sub-object)
+   * @param {ObjectId|null} assessmentId - Should be null here, will be updated later
    * @param {Object} session - MongoDB session
    * @returns {Array} Created appointment document(s)
    * @private
@@ -540,19 +582,13 @@ async createAppointment(appointmentData, userId) {
       status: 'scheduled',
       notes: appointmentData.notes || '',
       reasonForVisit: appointmentData.reasonForVisit,
-      preliminaryAssessmentId: assessmentId,
+      preliminaryAssessmentId: assessmentId, // Will be null initially
       isVirtual: appointmentData.isVirtual !== false,
       videoConferenceLink: appointmentData.isVirtual ? this._generateVideoLink() : null
     }], { session });
     
-    // Update assessment with appointment ID if needed
-    if (assessmentId) {
-      await Assessment.findByIdAndUpdate(
-        assessmentId,
-        { appointmentId: appointment[0]._id },
-        { session }
-      );
-    }
+    // DO NOT Update assessment here - it's handled in the main createAppointment flow
+    // if (assessmentId) { ... }
     
     return appointment;
   }
@@ -1008,17 +1044,6 @@ async createAppointment(appointmentData, userId) {
     };
     
     return validTransitions[currentStatus] && validTransitions[currentStatus].includes(newStatus);
-  }
-  
-  /**
-   * Generate a unique video conference link
-   * @returns {string} Video conference link
-   * @private
-   */
-  _generateVideoLink() {
-    const baseUrl = config.frontendUrl || 'http://localhost:3000';
-    const uniqueId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-    return `${baseUrl}/consultation/${uniqueId}`;
   }
   
   /**

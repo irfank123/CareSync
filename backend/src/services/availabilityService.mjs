@@ -29,9 +29,14 @@ class AvailabilityService {
       const timeSlots = await TimeSlot.find({
         doctorId,
         date: { $gte: start, $lte: end }
-      }).sort({ date: 1, startTime: 1 });
+      }).sort({ date: 1, startTime: 1 }).lean();
       
-      return timeSlots;
+      // Ensure ObjectIds are properly serialized
+      return timeSlots.map(slot => ({
+        ...slot,
+        _id: slot._id.toString(),
+        doctorId: slot.doctorId.toString()
+      }));
     } catch (error) {
       console.error('Get time slots error:', error);
       throw new Error('Failed to retrieve time slots');
@@ -58,9 +63,14 @@ class AvailabilityService {
         doctorId,
         date: { $gte: start, $lte: end },
         status: 'available'
-      }).sort({ date: 1, startTime: 1 });
+      }).sort({ date: 1, startTime: 1 }).lean();
       
-      return timeSlots;
+      // Ensure ObjectIds are properly serialized
+      return timeSlots.map(slot => ({
+        ...slot,
+        _id: slot._id.toString(),
+        doctorId: slot.doctorId.toString()
+      }));
     } catch (error) {
       console.error('Get available time slots error:', error);
       throw new Error('Failed to retrieve available time slots');

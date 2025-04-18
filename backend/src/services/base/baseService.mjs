@@ -64,7 +64,7 @@ class BaseService {
       const total = await this.model.countDocuments(query);
       
       return {
-        data,
+        data: this._serializeIds(data),
         total,
         totalPages: Math.ceil(total / limit),
         currentPage: page
@@ -75,7 +75,7 @@ class BaseService {
   }
   
   /**
-   * Get a resource by ID
+   * Get a single resource by ID
    * @param {string} id - Resource ID
    * @returns {Object} Resource
    */
@@ -87,7 +87,8 @@ class BaseService {
         .populate(this.options.populateFields)
         .lean();
       
-      return resource;
+      // Ensure ObjectIds are serialized correctly
+      return this._serializeIds(resource);
     } catch (error) {
       this._handleError(error, `Failed to retrieve ${this.modelName.toLowerCase()}`);
     }
@@ -105,12 +106,13 @@ class BaseService {
       
       // If populateFields is specified, fetch the complete resource with populated fields
       if (this.options.populateFields.length > 0) {
-        return await this.model.findById(resource._id)
+        const populatedResource = await this.model.findById(resource._id)
           .populate(this.options.populateFields)
           .lean();
+        return this._serializeIds(populatedResource);
       }
       
-      return resource.toObject();
+      return this._serializeIds(resource.toObject());
     } catch (error) {
       this._handleError(error, `Failed to create ${this.modelName.toLowerCase()}`);
     }
@@ -133,7 +135,7 @@ class BaseService {
         { new: true, runValidators: true }
       ).populate(this.options.populateFields).lean();
       
-      return resource;
+      return this._serializeIds(resource);
     } catch (error) {
       this._handleError(error, `Failed to update ${this.modelName.toLowerCase()}`);
     }
@@ -171,7 +173,13 @@ class BaseService {
         .populate(this.options.populateFields)
         .lean();
       
-      return resource;
+      // Explicit _id conversion before serialization
+      if (resource && resource._id && typeof resource._id.toString === 'function') {
+        console.log(`BaseService.getByField: Explicitly converting _id for resource found by ${field}=${value}`);
+        resource._id = resource._id.toString();
+      }
+
+      return this._serializeIds(resource);
     } catch (error) {
       this._handleError(error, `Failed to retrieve ${this.modelName.toLowerCase()} by ${field}`);
     }
@@ -220,6 +228,44 @@ class BaseService {
    */
   async startSession() {
     return await mongoose.startSession();
+  }
+  
+  /**
+   * Helper method to ensure consistent serialization of MongoDB ObjectIds
+   * @param {Object|Array} data - Data to process
+   * @returns {Object|Array} Processed data with serialized ObjectIds
+   * @protected
+   */
+  _serializeIds(data) {
+    if (!data) return data;
+    
+    const processObject = (obj) => {
+      if (!obj || typeof obj !== 'object') return obj;
+      
+      const result = Array.isArray(obj) ? [...obj] : { ...obj };
+      
+      Object.keys(result).forEach(key => {
+        const value = result[key];
+        
+        // Convert ObjectId to string
+        if (value && value._bsontype === 'ObjectID') {
+          result[key] = value.toString();
+        } 
+        // Process nested objects and arrays
+        else if (value && typeof value === 'object') {
+          result[key] = processObject(value);
+        }
+      });
+      
+      // Handle _id specifically if it exists and is an ObjectId
+      if (result._id && typeof result._id.toString === 'function') {
+        result._id = result._id.toString();
+      }
+      
+      return result;
+    };
+    
+    return processObject(data);
   }
   
   /**

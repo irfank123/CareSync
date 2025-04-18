@@ -4,6 +4,7 @@ import { validationResult } from 'express-validator';
 import { check } from 'express-validator';
 import { withServices, withServicesForController } from '../utils/controllerHelper.mjs';
 import { asyncHandler, AppError, formatValidationErrors } from '../utils/errorHandler.mjs';
+import mongoose from 'mongoose';
 
 /**
  * @desc    Get all appointments with filtering and pagination
@@ -114,6 +115,8 @@ const createAppointment = async (req, res, next, { appointmentService, patientSe
     return res.status(400).json(formatValidationErrors(errors.array()));
   }
   
+  let appointmentData = { ...req.body }; // Clone request body
+
   // If the user is a patient creating their own appointment,
   // make sure patientId matches their own record
   if (req.userRole === 'patient') {
@@ -121,21 +124,75 @@ const createAppointment = async (req, res, next, { appointmentService, patientSe
     if (!patientRecord) {
       return next(new AppError('Patient record not found', 404));
     }
-    
     // Override patientId in request body
-    req.body.patientId = patientRecord._id;
+    appointmentData.patientId = patientRecord._id;
   }
-  
-  // Create the appointment
-  const appointment = await appointmentService.createAppointment(
-    req.body,
-    req.user._id
-  );
-  
-  res.status(201).json({
-    success: true,
-    data: appointment
-  });
+
+  try {
+    const { Types } = mongoose;
+    const { Doctor } = await import('../models/index.mjs');
+
+    // --- Doctor ID Handling ---
+    const doctorIdentifier = appointmentData.doctorId;
+    let actualDoctorId = null;
+
+    if (!doctorIdentifier) {
+      return next(new AppError('Doctor ID is required', 400));
+    }
+
+    if (Types.ObjectId.isValid(doctorIdentifier)) {
+      actualDoctorId = doctorIdentifier;
+      // Verify doctor exists
+      const doctorExists = await Doctor.findById(actualDoctorId);
+      if (!doctorExists) {
+        return next(new AppError('Doctor not found with the provided ID', 404));
+      }
+    } else {
+      // If not a valid ObjectId, assume it's a license number
+      console.log(`Appointment Creation: Identifier ${doctorIdentifier} is not ObjectId, trying as licenseNumber`);
+      const doctor = await Doctor.findOne({ licenseNumber: doctorIdentifier });
+      if (!doctor) {
+        return next(new AppError('Doctor not found with the provided license number', 404));
+      }
+      actualDoctorId = doctor._id;
+      console.log(`Appointment Creation: Found doctor with ID ${actualDoctorId} using licenseNumber`);
+    }
+    // Update the appointmentData with the actual ObjectId
+    appointmentData.doctorId = actualDoctorId;
+    // --- End Doctor ID Handling ---
+
+    // Ensure timeSlotId is a valid ObjectId
+    if (!appointmentData.timeSlotId || !Types.ObjectId.isValid(appointmentData.timeSlotId)) {
+      return next(new AppError('Invalid or missing time slot ID format', 400));
+    }
+    // Convert timeSlotId to ObjectId type
+    appointmentData.timeSlotId = new Types.ObjectId(appointmentData.timeSlotId);
+
+    // Ensure patientId is a valid ObjectId (it should be after the override above)
+    if (!appointmentData.patientId || !Types.ObjectId.isValid(appointmentData.patientId)) {
+        // If patientId is still invalid here, something went wrong with patient lookup
+        return next(new AppError('Invalid or missing patient ID format', 400));
+    }
+    // Convert patientId to ObjectId type
+    appointmentData.patientId = new Types.ObjectId(appointmentData.patientId);
+
+    // Create the appointment using the modified data
+    const appointment = await appointmentService.createAppointment(
+      appointmentData,
+      req.user._id
+    );
+    
+    res.status(201).json({
+      success: true,
+      data: appointment
+    });
+  } catch (error) {
+    if (error.name === 'CastError') {
+      return next(new AppError(`Invalid ${error.path}: ${error.value}`, 400));
+    }
+    console.error('Appointment Creation Error:', error);
+    return next(error);
+  }
 };
 
 /**

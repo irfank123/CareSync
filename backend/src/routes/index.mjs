@@ -10,6 +10,8 @@ import doctorRoutes from './doctorRoutes.mjs';
 import staffRoutes from './staffRoutes.mjs';
 import appointmentRoutes from './appointmentRoutes.mjs';
 import availabilityRoutes from './availabilityRoutes.mjs';
+import testRoutes from './testRoutes.mjs';
+import assessmentRoutes from './assessmentRoutes.mjs';
 import { 
   errorMiddleware, 
   rateLimitMiddleware,
@@ -56,6 +58,14 @@ const setupRoutes = (app) => {
   
   // Availability routes
   apiRouter.use('/availability', availabilityRoutes);
+  
+  // Assessment routes
+  apiRouter.use('/assessments', assessmentRoutes);
+  
+  // Test routes (for development only)
+  if (process.env.NODE_ENV === 'development') {
+    apiRouter.use('/test', testRoutes);
+  }
   
   // Mount API router at /api
   app.use('/api', apiRouter);
