@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { format } from 'date-fns';
-import { API_BASE_URL } from '../config';
+import { appointmentService } from '../services/api';
 
 const PatientDashboard = () => {
   const { user } = useAuth();
@@ -27,30 +27,13 @@ const PatientDashboard = () => {
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(location.state?.message || null);
 
-  // Get auth token for API requests
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('token');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    };
-  };
-
   // Fetch upcoming appointments when component mounts
   useEffect(() => {
     const fetchUpcomingAppointments = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`${API_BASE_URL}/appointments/upcoming`, {
-          headers: getAuthHeaders(),
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch appointments');
-        }
-
-        const data = await response.json();
-        setUpcomingAppointments(data.data || []);
+        const response = await appointmentService.getUpcomingAppointments();
+        setUpcomingAppointments(response.data.data || []);
       } catch (err) {
         console.error('Error fetching appointments:', err);
         setError('Failed to load appointments. Please try again.');
@@ -112,7 +95,7 @@ const PatientDashboard = () => {
                   <Box key={appointment._id}>
                     <ListItem>
                       <ListItemText
-                        primary={`Dr. ${appointment.doctorUser?.firstName} ${appointment.doctorUser?.lastName}`}
+                        primary={appointment.doctorName || `Dr. ${appointment.doctorUser?.firstName || 'Unknown'} ${appointment.doctorUser?.lastName || 'Doctor'}`}
                         secondary={
                           <>
                             <Typography component="span" variant="body2" color="text.primary">

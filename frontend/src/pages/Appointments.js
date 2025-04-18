@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   Box,
@@ -26,6 +26,8 @@ import {
   FormControl,
   InputLabel,
   Select,
+  CircularProgress,
+  Alert,
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import {
@@ -39,6 +41,7 @@ import {
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { format } from 'date-fns';
+import { appointmentService, patientService, doctorService } from '../services/api';
 
 const Appointments = () => {
   const { user } = useAuth();
@@ -47,40 +50,68 @@ const Appointments = () => {
   const [filter, setFilter] = useState('all');
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [openDialog, setOpenDialog] = useState(false);
+  const [appointments, setAppointments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [userId, setUserId] = useState(null);
 
-  // Temporary mock data
-  const appointments = [
-    {
-      id: 1,
-      doctor: 'Dr. Sarah Wilson',
-      patient: 'John Doe',
-      date: '2024-04-15',
-      time: '10:00 AM',
-      status: 'upcoming',
-      type: 'General Checkup',
-      notes: 'Regular health checkup',
-    },
-    {
-      id: 2,
-      doctor: 'Dr. Michael Chen',
-      patient: 'Jane Smith',
-      date: '2024-04-10',
-      time: '02:30 PM',
-      status: 'completed',
-      type: 'Follow-up',
-      notes: 'Post-treatment follow-up',
-    },
-    {
-      id: 3,
-      doctor: 'Dr. Sarah Wilson',
-      patient: 'Alice Johnson',
-      date: '2024-04-16',
-      time: '11:30 AM',
-      status: 'cancelled',
-      type: 'Consultation',
-      notes: 'Initial consultation',
-    },
-  ];
+  // Fetch user ID based on role
+  useEffect(() => {
+    const fetchUserId = async () => {
+      try {
+        if (user?.role === 'doctor') {
+          const response = await doctorService.getByUserId(user.id);
+          console.log('Doctor response:', response);
+          // Extract the doctor ID from the response
+          setUserId(response?.data?.data?._id);
+        }
+        // We don't need to fetch patient ID anymore since we use the /me endpoint
+      } catch (err) {
+        console.error('Error fetching user record:', err);
+        setError('Failed to load user data');
+      }
+    };
+
+    if (user?.id && user?.role === 'doctor') {
+      fetchUserId();
+    }
+  }, [user]);
+
+  // Fetch appointments
+  useEffect(() => {
+    const fetchAppointments = async () => {
+      try {
+        setLoading(true);
+        let response;
+
+        if (user?.role === 'doctor' && userId) {
+          response = await appointmentService.getDoctorAppointments(userId);
+        } else if (user?.role === 'patient') {
+          // Use the new /me endpoint for patients instead of requiring patientId
+          response = await appointmentService.getMyAppointments();
+        } else if (user?.role === 'admin' || user?.role === 'staff') {
+          // Admin or staff - get all appointments
+          response = await appointmentService.getAll();
+        }
+
+        if (response) {
+          const { data, totalPages: pages, currentPage: page } = response.data;
+          setAppointments(data || []);
+          setTotalPages(pages || 1);
+          setCurrentPage(page || 1);
+        }
+      } catch (err) {
+        console.error('Error fetching appointments:', err);
+        setError('Failed to load appointments');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAppointments();
+  }, [user?.role, userId]);
 
   const handleViewChange = (event, newValue) => {
     setView(newValue);
@@ -99,18 +130,30 @@ const Appointments = () => {
   };
 
   const getStatusChip = (status) => {
+    const statusMapping = {
+      'scheduled': 'upcoming',
+      'checked-in': 'in-progress',
+      'in-progress': 'in-progress',
+      'completed': 'completed',
+      'cancelled': 'cancelled',
+      'no-show': 'cancelled'
+    };
+    
+    const mappedStatus = statusMapping[status] || status;
+    
     const statusProps = {
-      upcoming: { color: 'primary', icon: <AccessTime sx={{ fontSize: 16 }} /> },
-      completed: { color: 'success', icon: <CheckCircle sx={{ fontSize: 16 }} /> },
-      cancelled: { color: 'error', icon: <Cancel sx={{ fontSize: 16 }} /> },
+      'upcoming': { color: 'primary', icon: <AccessTime sx={{ fontSize: 16 }} /> },
+      'in-progress': { color: 'warning', icon: <AccessTime sx={{ fontSize: 16 }} /> },
+      'completed': { color: 'success', icon: <CheckCircle sx={{ fontSize: 16 }} /> },
+      'cancelled': { color: 'error', icon: <Cancel sx={{ fontSize: 16 }} /> },
     };
 
-    const { color, icon } = statusProps[status] || statusProps.upcoming;
+    const { color, icon } = statusProps[mappedStatus] || statusProps.upcoming;
 
     return (
       <Chip
         icon={icon}
-        label={status.charAt(0).toUpperCase() + status.slice(1)}
+        label={status.charAt(0).toUpperCase() + status.slice(1).replace('-', ' ')}
         color={color}
         size="small"
       />
@@ -119,8 +162,32 @@ const Appointments = () => {
 
   const filteredAppointments = appointments.filter(appointment => {
     if (filter === 'all') return true;
-    return appointment.status === filter;
+    
+    // Map the filter values to appointment status values
+    const statusMapping = {
+      'upcoming': ['scheduled', 'checked-in'],
+      'completed': ['completed'],
+      'cancelled': ['cancelled', 'no-show']
+    };
+    
+    return statusMapping[filter]?.includes(appointment.status);
   });
+
+  if (loading) {
+    return (
+      <Container maxWidth="lg" sx={{ mt: 4, mb: 4, display: 'flex', justifyContent: 'center' }}>
+        <CircularProgress />
+      </Container>
+    );
+  }
+
+  if (error) {
+    return (
+      <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+        <Alert severity="error">{error}</Alert>
+      </Container>
+    );
+  }
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -202,49 +269,57 @@ const Appointments = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {filteredAppointments.map((appointment) => (
-                <TableRow key={appointment.id}>
-                  <TableCell>
-                    {isDoctor ? appointment.patient : appointment.doctor}
-                  </TableCell>
-                  <TableCell>{appointment.date}</TableCell>
-                  <TableCell>{appointment.time}</TableCell>
-                  <TableCell>{appointment.type}</TableCell>
-                  <TableCell>{getStatusChip(appointment.status)}</TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        component={RouterLink}
-                        to={`/appointments/${appointment.id}`}
-                      >
-                        View
-                      </Button>
-                      {appointment.status === 'upcoming' && (
-                        <>
-                          {isDoctor && (
+              {filteredAppointments.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} align="center">No appointments found</TableCell>
+                </TableRow>
+              ) : (
+                filteredAppointments.map((appointment) => (
+                  <TableRow key={appointment._id}>
+                    <TableCell>
+                      {isDoctor 
+                        ? `${appointment.patientName || `${appointment.patientUser?.firstName || 'Unknown'} ${appointment.patientUser?.lastName || 'Patient'}`}` 
+                        : appointment.doctorName || `Dr. ${appointment.doctorUser?.firstName || 'Unknown'} ${appointment.doctorUser?.lastName || 'Doctor'}`}
+                    </TableCell>
+                    <TableCell>{format(new Date(appointment.date), 'yyyy-MM-dd')}</TableCell>
+                    <TableCell>{appointment.startTime}</TableCell>
+                    <TableCell>{appointment.type}</TableCell>
+                    <TableCell>{getStatusChip(appointment.status)}</TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          component={RouterLink}
+                          to={`/appointments/${appointment._id}`}
+                        >
+                          View
+                        </Button>
+                        {appointment.status === 'scheduled' && (
+                          <>
+                            {isDoctor && (
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                onClick={() => {}}
+                              >
+                                <Edit />
+                              </IconButton>
+                            )}
                             <IconButton
                               size="small"
-                              color="primary"
+                              color="error"
                               onClick={() => {}}
                             >
-                              <Edit />
+                              <Cancel />
                             </IconButton>
-                          )}
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => {}}
-                          >
-                            <Cancel />
-                          </IconButton>
-                        </>
-                      )}
-                    </Box>
-                  </TableCell>
-                </TableRow>
-              ))}
+                          </>
+                        )}
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </TableContainer>
@@ -298,7 +373,7 @@ const Appointments = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button variant="contained" onClick={handleCloseDialog}>
+          <Button variant="contained" color="primary">
             Book Appointment
           </Button>
         </DialogActions>

@@ -1,11 +1,11 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "main": "src/server.mjs", 
-  "type": "module",          
+  "main": "src/server.mjs",
+  "type": "module",
   "scripts": {
-    "start": "node src/server.mjs",                 
-    "dev": "node --require dotenv/config src/server.mjs", 
+    "start": "node src/server.mjs",
+    "dev": "node --require dotenv/config src/server.mjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -14,8 +14,9 @@
   "description": "",
   "dependencies": {
     "auth0": "^4.21.0",
-    "bcryptjs": "^3.0.2", 
-    "config": "^3.3.12",     
+    "axios": "^1.8.4",
+    "bcryptjs": "^3.0.2",
+    "config": "^3.3.12",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

@@ -153,11 +153,16 @@ export const appointmentService = {
   getById: (id) => api.get(`/appointments/${id}`),
   update: (id, appointmentData) => api.put(`/appointments/${id}`, appointmentData),
   delete: (id) => api.delete(`/appointments/${id}`),
+  getPatientAppointments: (patientId) => api.get(`/appointments/patient/${patientId}`),
+  getDoctorAppointments: (doctorId) => api.get(`/appointments/doctor/${doctorId}`),
+  getUpcomingAppointments: () => api.get('/appointments/upcoming'),
+  getMyAppointments: () => api.get('/appointments/me'),
 };
 
 export const doctorService = {
   getAll: () => api.get('/doctors'),
   getById: (id) => api.get(`/doctors/${id}`),
+  getByUserId: (userId) => api.get(`/doctors/user/${userId}`),
   getAvailability: (id) => api.get(`/doctors/${id}/availability`),
   updateProfile: (id, profileData) => api.put(`/doctors/${id}`, profileData),
 };
@@ -165,6 +170,7 @@ export const doctorService = {
 export const patientService = {
   getAll: () => api.get('/patients'),
   getById: (id) => api.get(`/patients/${id}`),
+  getByUserId: (userId) => api.get(`/patients/user/${userId}`),
   updateProfile: (id, profileData) => api.put(`/patients/${id}`, profileData),
   getMedicalHistory: (id) => api.get(`/patients/${id}/medical-history`),
 };

@@ -1,6 +1,7 @@
 // src/routes/patientRoutes.mjs
 
 import express from 'express';
+import mongoose from 'mongoose';
 import {
   getPatientsWithDI,
   getPatientWithDI,
@@ -37,6 +38,58 @@ router.get(
   cacheMiddleware.cacheResponse(60), // Cache for 1 minute
   auditMiddleware.logAccess('patient-profile'),
   getMyProfileWithDI
+);
+
+// Route to get patient by user ID - must be before /:id route
+router.get(
+  '/user/:userId',
+  cacheMiddleware.cacheResponse(300), // Cache for 5 minutes
+  async (req, res) => {
+    try {
+      console.log('GET patient by userId request:', {
+        userId: req.params.userId,
+        url: req.originalUrl,
+        method: req.method
+      });
+      
+      const { Patient } = await import('../models/index.mjs');
+      const userId = req.params.userId;
+      console.log('Looking up patient with userId:', userId);
+      
+      // Ensure the userId is a valid ObjectId
+      if (!mongoose.Types.ObjectId.isValid(userId)) {
+        console.log('Invalid userId format:', userId);
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid user ID format'
+        });
+      }
+      
+      const patient = await Patient.findOne({ userId: new mongoose.Types.ObjectId(userId) });
+      console.log('Patient lookup result:', patient ? 'Found' : 'Not found');
+      
+      if (!patient) {
+        console.log('Patient not found for userId:', userId);
+        return res.status(404).json({
+          success: false,
+          message: 'Patient not found for this user'
+        });
+      }
+      
+      console.log('Returning patient info for userId:', userId, 'patientId:', patient._id);
+      res.status(200).json({
+        success: true,
+        data: patient
+      });
+    } catch (err) {
+      console.error('Error fetching patient by user ID:', err);
+      res.status(500).json({
+        success: false,
+        message: 'Error fetching patient profile',
+        error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      });
+    }
+  }
 );
 
 router.put(
