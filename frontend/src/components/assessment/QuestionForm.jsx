@@ -15,26 +15,34 @@ import {
   StepLabel,
   Paper,
   Divider,
-  Alert
+  Alert,
+  Select,
+  MenuItem,
+  Slider,
+  Switch
 } from '@mui/material';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 /**
- * Component for displaying and answering assessment questions
+ * Component for displaying and answering AI-generated assessment questions.
+ * Handles different answer types and navigation between questions.
  */
-const QuestionForm = ({ questions, onSubmit, loading }) => {
+const QuestionForm = ({ questions, onSubmit, onSkip, isLoading }) => {
   const [currentStep, setCurrentStep] = useState(0);
-  const [responses, setResponses] = useState({});
+  // Store answers keyed by questionId
+  const [answers, setAnswers] = useState({});
   const [errors, setErrors] = useState({});
 
-  // If no questions, display message
-  if (!questions || questions.length === 0) {
+  // Basic check for questions array
+  if (!Array.isArray(questions) || questions.length === 0) {
     return (
       <Box sx={{ my: 4, textAlign: 'center' }}>
         <Typography variant="h6" color="text.secondary">
-          No questions available. Please enter your symptoms first.
+          No questions to display.
         </Typography>
+         {/* Provide a way to skip if questions fail to load */} 
+         <Button onClick={onSkip} sx={{ mt: 2 }} color="secondary">Skip Assessment</Button>
       </Box>
     );
   }
@@ -42,59 +50,57 @@ const QuestionForm = ({ questions, onSubmit, loading }) => {
   const currentQuestion = questions[currentStep];
 
   /**
-   * Handle response change
-   * @param {string} questionId - ID of the question
-   * @param {string} value - Answer value
+   * Handle answer change for various input types.
    */
-  const handleResponseChange = (questionId, value) => {
-    setResponses({
-      ...responses,
+  const handleAnswerChange = (questionId, value) => {
+    setAnswers(prev => ({
+      ...prev,
       [questionId]: value
-    });
+    }));
 
-    // Clear error for this question
+    // Clear error for this question upon interaction
     if (errors[questionId]) {
-      const newErrors = { ...errors };
-      delete newErrors[questionId];
-      setErrors(newErrors);
+      setErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[questionId];
+        return newErrors;
+      });
     }
   };
 
   /**
-   * Move to the next question
+   * Validate the answer for the current question.
+   * For now, just checks if an answer exists.
+   */
+  const validateCurrentAnswer = () => {
+    const questionId = currentQuestion.questionId;
+    if (answers[questionId] === undefined || answers[questionId] === null || answers[questionId] === '') {
+       setErrors(prev => ({ ...prev, [questionId]: 'Please provide an answer.' }));
+      return false;
+    }
+    return true;
+  };
+
+  /**
+   * Move to the next question or submit if on the last question.
    */
   const handleNext = () => {
-    const questionId = currentQuestion.id;
-    
-    // Validate response
-    if (!responses[questionId]) {
-      setErrors({
-        ...errors,
-        [questionId]: 'Please provide an answer'
-      });
-      return;
-    }
+    if (!validateCurrentAnswer()) return;
 
     if (currentStep < questions.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
-      // Submit all responses
-      const formattedResponses = Object.keys(responses).map(questionId => {
-        const question = questions.find(q => q.id === questionId);
-        return {
-          questionId,
-          question: question.text,
-          answer: responses[questionId],
-          answerType: question.answerType || 'text'
-        };
-      });
-
-      onSubmit(formattedResponses);
+      // Prepare answers in the format expected by the service
+      const formattedAnswers = Object.entries(answers).map(([questionId, answer]) => ({
+        questionId,
+        answer
+      }));
+      onSubmit(formattedAnswers); // Call the onSubmit prop passed from parent
     }
   };
 
   /**
-   * Move to the previous question
+   * Move to the previous question.
    */
   const handleBack = () => {
     if (currentStep > 0) {
@@ -103,61 +109,87 @@ const QuestionForm = ({ questions, onSubmit, loading }) => {
   };
 
   /**
-   * Render the appropriate input based on question type
+   * Render the appropriate input based on question's answerType.
    */
   const renderQuestionInput = () => {
-    const questionId = currentQuestion.id;
-    const questionType = currentQuestion.type || 'text';
-    const required = true;
+    if (!currentQuestion) return null; // Should not happen if questions array is valid
+    
+    const { questionId, question, answerType, options } = currentQuestion;
+    const currentAnswer = answers[questionId] ?? ''; // Default to empty string or suitable default
+    const hasError = !!errors[questionId];
 
-    switch (questionType) {
+    switch (answerType) {
       case 'boolean':
         return (
-          <FormControl component="fieldset" required={required} error={!!errors[questionId]}>
-            <FormLabel component="legend">Your Answer</FormLabel>
-            <RadioGroup
-              value={responses[questionId] || ''}
-              onChange={(e) => handleResponseChange(questionId, e.target.value)}
-            >
-              <FormControlLabel value="yes" control={<Radio />} label="Yes" />
-              <FormControlLabel value="no" control={<Radio />} label="No" />
-              <FormControlLabel value="uncertain" control={<Radio />} label="Uncertain" />
-            </RadioGroup>
-            {errors[questionId] && (
-              <Typography color="error" variant="caption">
-                {errors[questionId]}
-              </Typography>
-            )}
-          </FormControl>
-        );
-      
-      case 'scale':
-        const options = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        return (
-          <FormControl component="fieldset" required={required} error={!!errors[questionId]}>
-            <FormLabel component="legend">Rate from 1-10</FormLabel>
+          <FormControl component="fieldset" required error={hasError} sx={{ mt: 2 }}>
+            <FormLabel component="legend">Select one:</FormLabel>
             <RadioGroup
               row
-              value={responses[questionId] || ''}
-              onChange={(e) => handleResponseChange(questionId, e.target.value)}
+              value={currentAnswer === true ? 'true' : currentAnswer === false ? 'false' : ''} // Handle boolean state
+              onChange={(e) => handleAnswerChange(questionId, e.target.value === 'true')}
             >
-              {options.map(option => (
-                <FormControlLabel 
-                  key={option} 
-                  value={option.toString()} 
-                  control={<Radio />} 
-                  label={option} 
-                />
-              ))}
+              <FormControlLabel value="true" control={<Radio />} label="Yes" />
+              <FormControlLabel value="false" control={<Radio />} label="No" />
+              {/* Maybe add Uncertain/Don't Know option? */}
             </RadioGroup>
-            {errors[questionId] && (
-              <Typography color="error" variant="caption">
-                {errors[questionId]}
-              </Typography>
-            )}
+            {hasError && <Typography color="error" variant="caption">{errors[questionId]}</Typography>}
           </FormControl>
         );
-      
+
+      case 'scale': // Example using Slider
+        return (
+          <Box sx={{ mt: 3 }}>
+            <FormLabel component="legend" error={hasError}>On a scale of 1 to 10:</FormLabel>
+            <Slider
+              value={typeof currentAnswer === 'number' ? currentAnswer : 0} // Slider needs number
+              onChange={(e, newValue) => handleAnswerChange(questionId, newValue)}
+              aria-labelledby="scale-slider"
+              valueLabelDisplay="auto"
+              step={1}
+              marks
+              min={1}
+              max={10}
+              sx={{ width: '90%', mx: 'auto', display: 'block' }}
+            />
+             {hasError && <Typography color="error" variant="caption">{errors[questionId]}</Typography>}
+          </Box>
+        );
+
+      case 'select':
+        return (
+          <FormControl fullWidth required error={hasError} sx={{ mt: 2 }}>
+            <FormLabel component="legend" sx={{ mb: 1 }}>Select from options:</FormLabel>
+            <Select
+              value={currentAnswer}
+              onChange={(e) => handleAnswerChange(questionId, e.target.value)}
+              displayEmpty
+            >
+              <MenuItem value="" disabled><em>Please select...</em></MenuItem>
+              {(options || []).map((option, index) => (
+                <MenuItem key={index} value={option}>{option}</MenuItem>
+              ))}
+            </Select>
+             {hasError && <Typography color="error" variant="caption">{errors[questionId]}</Typography>}
+          </FormControl>
+        );
+        
+       case 'number':
+         return (
+           <TextField
+            fullWidth
+            type="number"
+            label="Your Answer (Number)"
+            variant="outlined"
+            value={currentAnswer}
+            onChange={(e) => handleAnswerChange(questionId, e.target.value === '' ? '' : Number(e.target.value))}
+            required
+            error={hasError}
+            helperText={errors[questionId]}
+            sx={{ mt: 2 }}
+            inputProps={{ step: "any" }} // Allow decimals if needed
+          />
+         );
+
       case 'text':
       default:
         return (
@@ -167,10 +199,10 @@ const QuestionForm = ({ questions, onSubmit, loading }) => {
             rows={3}
             label="Your Answer"
             variant="outlined"
-            value={responses[questionId] || ''}
-            onChange={(e) => handleResponseChange(questionId, e.target.value)}
-            required={required}
-            error={!!errors[questionId]}
+            value={currentAnswer}
+            onChange={(e) => handleAnswerChange(questionId, e.target.value)}
+            required
+            error={hasError}
             helperText={errors[questionId]}
             sx={{ mt: 2 }}
           />
@@ -179,30 +211,34 @@ const QuestionForm = ({ questions, onSubmit, loading }) => {
   };
 
   return (
-    <Box sx={{ width: '100%', mt: 4 }}>
+    <Box sx={{ width: '100%', mt: 3 }}>
+      {/* Stepper showing question progress */}
       <Stepper activeStep={currentStep} alternativeLabel sx={{ mb: 4 }}>
-        {questions.map((question, index) => (
-          <Step key={index}>
-            <StepLabel>Question {index + 1}</StepLabel>
+        {questions.map((q, index) => (
+          <Step key={q.questionId || index}> 
+            <StepLabel>Q {index + 1}</StepLabel>
           </Step>
         ))}
       </Stepper>
 
-      <Paper elevation={2} sx={{ p: 3, mb: 4 }}>
-        <Typography variant="h6" gutterBottom>
-          {currentQuestion.text}
+      <Paper elevation={2} sx={{ p: { xs: 2, md: 3 }, mb: 4 }}>
+        <Typography variant="h6" gutterBottom component="div">
+          {/* Use question text from the object */} 
+          {currentQuestion?.question || 'Loading question...'}
         </Typography>
         
         <Divider sx={{ my: 2 }} />
         
         {renderQuestionInput()}
         
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 4 }}>
+        {/* Navigation Buttons */} 
+        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', mt: 4 }}>
           <Button
             variant="outlined"
             onClick={handleBack}
-            disabled={currentStep === 0 || loading}
+            disabled={currentStep === 0 || isLoading}
             startIcon={<ArrowBackIcon />}
+            sx={{ mb: { xs: 1, sm: 0 } }}
           >
             Back
           </Button>
@@ -211,25 +247,32 @@ const QuestionForm = ({ questions, onSubmit, loading }) => {
             variant="contained"
             color="primary"
             onClick={handleNext}
-            disabled={loading}
+            disabled={isLoading}
             endIcon={currentStep === questions.length - 1 ? null : <ArrowForwardIcon />}
+            sx={{ mb: { xs: 1, sm: 0 } }}
           >
-            {loading ? (
+            {isLoading ? (
               <CircularProgress size={24} color="inherit" />
             ) : currentStep === questions.length - 1 ? (
-              'Submit'
+              'Submit Answers'
             ) : (
-              'Next'
+              'Next Question'
             )}
           </Button>
         </Box>
       </Paper>
 
-      <Box sx={{ mt: 2, mb: 4 }}>
-        <Alert severity="info">
-          Answer all questions honestly for the most accurate assessment. Your responses help the AI provide better recommendations for your healthcare provider.
-        </Alert>
+      {/* Keep Skip button separate or integrate near navigation */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+           <Button 
+              onClick={onSkip} 
+              disabled={isLoading}
+              color="secondary"
+            >
+              Skip Assessment & Proceed
+            </Button>
       </Box>
+      
     </Box>
   );
 };

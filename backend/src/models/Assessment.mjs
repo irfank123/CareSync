@@ -14,14 +14,19 @@ const AssessmentSchema = new mongoose.Schema(
       required: true
     },
     symptoms: [String],
-    responses: [{
+    generatedQuestions: [{
       questionId: String,
       question: String,
-      answer: String,
       answerType: {
         type: String,
-        enum: ['text', 'boolean', 'select', 'scale']
-      }
+        enum: ['text', 'boolean', 'select', 'scale', 'number'],
+        default: 'text'
+      },
+      options: [String]
+    }],
+    responses: [{
+      questionId: String,
+      answer: mongoose.Schema.Types.Mixed
     }],
     aiGeneratedReport: {
       type: String

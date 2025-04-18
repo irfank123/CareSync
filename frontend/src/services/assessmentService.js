@@ -5,93 +5,79 @@ import { axiosInstance } from './api';
  */
 const assessmentService = {
   /**
-   * Start a new assessment
-   * @param {string} patientId - Patient ID
-   * @param {string} appointmentId - Appointment ID
-   * @param {Array} symptoms - Array of symptom descriptions
-   * @returns {Promise<Object>} Assessment data
+   * Start a new assessment and get initial questions.
+   * Assumes authentication provides necessary context (like patientId if user is patient).
+   * @param {string} appointmentId - Appointment ID assessment is linked to.
+   * @param {Array} symptoms - Array of symptom descriptions.
+   * @returns {Promise<Object>} { assessmentId: string, questions: Array }
    */
-  startAssessment: (patientId, appointmentId, symptoms) => {
-    return axiosInstance.post(`/assessments/patients/${patientId}/assessments/start`, {
+  startAssessment: (appointmentId, symptoms) => {
+    // Route changed to /api/assessments/start
+    return axiosInstance.post(`/assessments/start`, {
       appointmentId,
       symptoms
+      // patientId might be inferred from auth on backend if needed
     });
   },
 
   /**
-   * Get assessment by ID
-   * @param {string} patientId - Patient ID
-   * @param {string} assessmentId - Assessment ID
-   * @returns {Promise<Object>} Assessment data
+   * Submit answers for an assessment and trigger report generation.
+   * @param {string} assessmentId - The ID of the assessment being answered.
+   * @param {Array} answers - Array of answer objects { questionId: string, answer: any }.
+   * @returns {Promise<Object>} Completed assessment data.
    */
-  getAssessment: (patientId, assessmentId) => {
-    return axiosInstance.get(`/assessments/patients/${patientId}/assessments/${assessmentId}`);
+  submitAnswers: (assessmentId, answers) => {
+    // Route changed to /api/assessments/:id/responses
+    return axiosInstance.post(`/assessments/${assessmentId}/responses`, {
+      answers
+    });
+  },
+  
+  /**
+   * Get a specific assessment by its ID.
+   * @param {string} assessmentId - Assessment ID.
+   * @returns {Promise<Object>} Assessment data.
+   */
+  getAssessment: (assessmentId) => {
+    // Route changed to /api/assessments/:id
+    return axiosInstance.get(`/assessments/${assessmentId}`);
   },
 
   /**
-   * Get all assessments for a patient
-   * @param {string} patientId - Patient ID
-   * @param {Object} params - Query parameters (page, limit, sort, order)
-   * @returns {Promise<Object>} Assessment list and pagination data
+   * Get all assessments for a specific patient.
+   * @param {string} patientId - Patient ID.
+   * @param {Object} params - Query parameters (page, limit, sort, order).
+   * @returns {Promise<Object>} Assessment list and pagination data.
    */
   getPatientAssessments: (patientId, params = {}) => {
-    return axiosInstance.get(`/assessments/patients/${patientId}/assessments`, { params });
+    // Route changed to /api/assessments?patientId=...
+    return axiosInstance.get(`/assessments`, { params: { ...params, patientId } });
   },
 
   /**
-   * Get assessment questions
-   * @param {string} patientId - Patient ID
-   * @param {string} assessmentId - Assessment ID
-   * @returns {Promise<Array>} Questions list
+   * Skip an assessment.
+   * @param {string} assessmentId - Assessment ID.
+   * @param {string} reason - Reason for skipping.
+   * @returns {Promise<Object>} Skipped assessment data.
    */
-  getQuestions: (patientId, assessmentId) => {
-    return axiosInstance.get(`/assessments/patients/${patientId}/assessments/${assessmentId}/questions`);
-  },
-
-  /**
-   * Save responses to assessment questions
-   * @param {string} patientId - Patient ID
-   * @param {string} assessmentId - Assessment ID
-   * @param {Array} responses - Array of response objects
-   * @returns {Promise<Object>} Updated assessment
-   */
-  saveResponses: (patientId, assessmentId, responses) => {
-    return axiosInstance.post(`/assessments/patients/${patientId}/assessments/${assessmentId}/responses`, {
-      responses
-    });
-  },
-
-  /**
-   * Complete an assessment and generate report
-   * @param {string} patientId - Patient ID
-   * @param {string} assessmentId - Assessment ID
-   * @returns {Promise<Object>} Completed assessment with report
-   */
-  completeAssessment: (patientId, assessmentId) => {
-    return axiosInstance.post(`/assessments/patients/${patientId}/assessments/${assessmentId}/complete`);
-  },
-
-  /**
-   * Skip an assessment
-   * @param {string} patientId - Patient ID
-   * @param {string} assessmentId - Assessment ID
-   * @param {string} reason - Reason for skipping
-   * @returns {Promise<Object>} Skipped assessment
-   */
-  skipAssessment: (patientId, assessmentId, reason) => {
-    return axiosInstance.post(`/assessments/patients/${patientId}/assessments/${assessmentId}/skip`, {
+  skipAssessment: (assessmentId, reason) => {
+    // Route changed to /api/assessments/:id/skip
+    return axiosInstance.post(`/assessments/${assessmentId}/skip`, {
       reason
     });
   },
 
   /**
-   * Get assessment for a specific appointment
-   * @param {string} appointmentId - Appointment ID
-   * @returns {Promise<Object>} Assessment data
+   * Get assessment for a specific appointment.
+   * @param {string} appointmentId - Appointment ID.
+   * @returns {Promise<Object>} Assessment data.
    */
   getAssessmentByAppointment: (appointmentId) => {
-    return axiosInstance.get(`/assessments/appointments/${appointmentId}/assessment`);
+    // Route changed slightly
+    return axiosInstance.get(`/assessments/by-appointment/${appointmentId}`);
   }
+
+  // Removed obsolete methods: getQuestions, saveResponses, completeAssessment
 };
 
 export default assessmentService; 

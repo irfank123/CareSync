@@ -14,275 +14,210 @@ const Patient = mongoose.model('Patient');
  */
 class AssessmentService {
   /**
-   * Start a new assessment
-   * @param {Object} assessmentData - Initial assessment data
-   * @returns {Promise<Object>} Created assessment
+   * Start a new assessment, generate initial questions.
+   * @param {string} patientId
+   * @param {string} appointmentId
+   * @param {string[]} symptoms
+   * @param {string} userId - ID of the user starting the assessment (for audit)
+   * @returns {Promise<Object>} { assessmentId: string, questions: Array }
    */
-  async startAssessment(assessmentData) {
+  async startAssessment(patientId, appointmentId, symptoms, userId) {
     try {
-      const { patientId, appointmentId, symptoms } = assessmentData;
-      
       // Validate the appointment
       const appointment = await Appointment.findById(appointmentId);
-      if (!appointment) {
-        throw new Error('Invalid appointment');
+      if (!appointment || appointment.patientId.toString() !== patientId) {
+        throw new Error('Invalid appointment or patient ID mismatch');
       }
-      
-      // Check if assessment already exists for this appointment
-      const existingAssessment = await Assessment.findOne({ appointmentId });
-      if (existingAssessment) {
-        // If there's already an in-progress assessment, return it
-        if (existingAssessment.status === 'in-progress') {
-          return existingAssessment;
-        }
-        
-        // If there's a completed assessment, create a new version
-        if (existingAssessment.status === 'completed') {
-          // Archive the old one by marking it as a previous version
-          await Assessment.findByIdAndUpdate(existingAssessment._id, {
-            status: 'archived'
-          });
-        }
-      }
-      
+
+      // Generate initial questions based on symptoms
+      const generatedQuestions = await aiService.generateQuestions(symptoms || []);
+
       // Create a new assessment
       const assessment = await Assessment.create({
         patientId,
         appointmentId,
         symptoms: symptoms || [],
+        generatedQuestions: generatedQuestions, // Store generated questions
         responses: [],
         status: 'in-progress',
         creationDate: new Date()
       });
-      
+
+      // Link assessment to appointment
+      await Appointment.findByIdAndUpdate(appointmentId, { 
+        preliminaryAssessmentId: assessment._id 
+      });
+
       // Log the assessment creation
       await AuditLog.create({
-        userId: assessmentData.userId,
+        userId: userId, // Use the provided userId
         action: 'create',
         resource: 'assessment',
         resourceId: assessment._id,
-        details: {
-          patientId,
-          appointmentId
-        }
+        details: { patientId, appointmentId, symptoms: symptoms?.join(', ') }
       });
-      
-      return assessment;
+
+      // Return the ID and the questions for the frontend
+      return {
+        assessmentId: assessment._id.toString(),
+        questions: generatedQuestions
+      };
+
     } catch (error) {
       console.error('Error starting assessment:', error);
-      throw error;
+      throw new Error(`Failed to start assessment: ${error.message}`);
     }
   }
-  
+
   /**
-   * Generate questions based on symptoms and previous responses
+   * Save patient responses and trigger AI report generation.
    * @param {string} assessmentId - Assessment ID
-   * @returns {Promise<Array>} Generated questions
+   * @param {Array} answers - Array of { questionId: string, answer: any }
+   * @param {string} userId - ID of user submitting answers (for audit)
+   * @returns {Promise<Object>} Completed assessment
    */
-  async generateQuestions(assessmentId) {
+  async submitAnswersAndGenerateReport(assessmentId, answers, userId) {
     try {
       const assessment = await Assessment.findById(assessmentId);
       if (!assessment) {
         throw new Error('Assessment not found');
       }
-      
-      // If no symptoms are provided, return an empty array
-      if (!assessment.symptoms || assessment.symptoms.length === 0) {
-        return [];
-      }
-      
-      // Generate questions using AI service
-      const questions = await aiService.generateQuestions(
-        assessment.symptoms,
-        assessment.responses
-      );
-      
-      return questions;
-    } catch (error) {
-      console.error('Error generating questions:', error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Save patient responses to assessment questions
-   * @param {string} assessmentId - Assessment ID
-   * @param {Array} responses - Array of question-answer pairs
-   * @returns {Promise<Object>} Updated assessment
-   */
-  async saveResponses(assessmentId, responses) {
-    try {
-      const assessment = await Assessment.findById(assessmentId);
-      if (!assessment) {
-        throw new Error('Assessment not found');
-      }
-      
+
       if (assessment.status !== 'in-progress') {
-        throw new Error('Cannot update a completed or archived assessment');
+        throw new Error('Assessment is not in-progress. Cannot submit answers.');
       }
-      
-      // Merge existing responses with new ones
-      const updatedResponses = [...assessment.responses];
-      
-      // Process each new response
-      for (const response of responses) {
-        const { questionId, question, answer, answerType } = response;
-        
-        // Find existing response with the same questionId
-        const existingIndex = updatedResponses.findIndex(r => r.questionId === questionId);
-        
-        if (existingIndex >= 0) {
-          // Update existing response
-          updatedResponses[existingIndex] = {
-            ...updatedResponses[existingIndex],
-            answer,
-            updatedAt: new Date()
+
+      // Map answers to the structure expected by the schema and AI
+      const formattedResponses = assessment.generatedQuestions.map(q => {
+          const patientAnswer = answers.find(a => a.questionId === q.questionId);
+          return {
+              questionId: q.questionId,
+              question: q.question, // Include original question text for context
+              answer: patientAnswer ? patientAnswer.answer : null // Store the answer
           };
-        } else {
-          // Add new response
-          updatedResponses.push({
-            questionId,
-            question,
-            answer,
-            answerType,
-            createdAt: new Date()
-          });
-        }
-      }
-      
-      // Update the assessment with new responses
-      const updatedAssessment = await Assessment.findByIdAndUpdate(
-        assessmentId,
-        { responses: updatedResponses },
-        { new: true }
-      );
-      
-      return updatedAssessment;
-    } catch (error) {
-      console.error('Error saving responses:', error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Complete assessment and generate AI report
-   * @param {string} assessmentId - Assessment ID
-   * @returns {Promise<Object>} Completed assessment with AI report
-   */
-  async completeAssessment(assessmentId) {
-    try {
-      const assessment = await Assessment.findById(assessmentId);
-      if (!assessment) {
-        throw new Error('Assessment not found');
-      }
-      
-      if (assessment.status !== 'in-progress') {
-        throw new Error('Cannot complete an already completed or archived assessment');
-      }
-      
-      // Generate AI report
+      }).filter(r => r.answer !== null); // Filter out unanswered questions potentially
+
+      // Update the assessment with responses first
+      assessment.responses = formattedResponses;
+      await assessment.save();
+
+      // Generate AI report using symptoms and the formatted responses
       const aiResults = await aiService.generateAssessmentReport({
         symptoms: assessment.symptoms,
-        responses: assessment.responses
+        responses: assessment.responses // Pass the saved responses
       });
-      
-      // Update assessment with report and set status to completed
-      const completedAssessment = await Assessment.findByIdAndUpdate(
-        assessmentId,
-        {
-          aiGeneratedReport: aiResults.report,
-          severity: aiResults.severity,
-          completionDate: new Date(),
-          status: 'completed'
-        },
-        { new: true }
-      );
-      
-      // Update appointment with assessment results
-      await Appointment.findByIdAndUpdate(
-        assessment.appointmentId,
-        {
-          preliminaryAssessment: {
-            assessmentId: completedAssessment._id,
-            severity: aiResults.severity,
-            completed: true
-          }
-        }
-      );
-      
+
+      // Update assessment with report details and mark as completed
+      assessment.aiGeneratedReport = aiResults.report;
+      assessment.severity = aiResults.severity; // Use severity from AI report
+      assessment.completionDate = new Date();
+      assessment.status = 'completed';
+      const completedAssessment = await assessment.save();
+
+      // Log the completion
+      await AuditLog.create({
+        userId: userId, 
+        action: 'update',
+        resource: 'assessment',
+        resourceId: assessmentId,
+        details: { status: 'completed', severity: assessment.severity }
+      });
+
       return completedAssessment;
+
     } catch (error) {
-      console.error('Error completing assessment:', error);
-      throw error;
+      console.error('Error submitting answers and generating report:', error);
+       throw new Error(`Failed to submit answers: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get a specific assessment by its ID.
+   * @param {string} assessmentId
+   * @returns {Promise<Object>} Assessment details
+   */
+  async getAssessmentById(assessmentId) {
+    try {
+      if (!mongoose.Types.ObjectId.isValid(assessmentId)) {
+         throw new Error('Invalid assessment ID format');
+      }
+      const assessment = await Assessment.findById(assessmentId);
+      if (!assessment) {
+        throw new Error('Assessment not found');
+      }
+      return assessment;
+    } catch (error) {
+      console.error('Error getting assessment by ID:', error);
+      throw new Error(`Failed to retrieve assessment: ${error.message}`);
     }
   }
   
+  /**
+   * Get the assessment associated with a specific appointment.
+   * @param {string} appointmentId
+   * @returns {Promise<Object|null>} Assessment details or null
+   */
+  async getAssessmentForAppointment(appointmentId) {
+    try {
+       if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
+         throw new Error('Invalid appointment ID format');
+      }
+      const assessment = await Assessment.findOne({ appointmentId });
+      // No error if not found, just return null
+      return assessment;
+    } catch (error) {
+      console.error('Error getting assessment for appointment:', error);
+      throw new Error(`Failed to retrieve assessment for appointment: ${error.message}`);
+    }
+  }
+
+  // --- Existing methods below (like skipAssessment, getPatientAssessments) can be kept or refactored as needed ---
+
   /**
    * Skip assessment and mark it as abandoned
    * @param {string} assessmentId - Assessment ID
    * @param {string} reason - Reason for skipping
+   * @param {string} userId - ID of user skipping (for audit)
    * @returns {Promise<Object>} Updated assessment
    */
-  async skipAssessment(assessmentId, reason) {
+  async skipAssessment(assessmentId, reason, userId) {
     try {
       const assessment = await Assessment.findById(assessmentId);
       if (!assessment) {
         throw new Error('Assessment not found');
       }
-      
+
       if (assessment.status !== 'in-progress') {
         throw new Error('Cannot skip an already completed or archived assessment');
       }
-      
+
       // Update assessment to abandoned status
       const skippedAssessment = await Assessment.findByIdAndUpdate(
         assessmentId,
         {
           status: 'abandoned',
           completionDate: new Date(),
-          aiGeneratedReport: reason || 'Assessment skipped by patient'
+          aiGeneratedReport: reason || 'Assessment skipped by user' // Store reason in report field
         },
         { new: true }
       );
-      
-      // Update appointment with skipped assessment info
-      await Appointment.findByIdAndUpdate(
-        assessment.appointmentId,
-        {
-          preliminaryAssessment: {
-            assessmentId: skippedAssessment._id,
-            skipped: true,
-            reason: reason || 'Patient preferred to discuss directly with doctor'
-          }
-        }
-      );
-      
+
+      // Log the skip action
+      await AuditLog.create({
+          userId: userId,
+          action: 'update',
+          resource: 'assessment',
+          resourceId: assessmentId,
+          details: { status: 'abandoned', reason: reason || 'Skipped' }
+      });
+
       return skippedAssessment;
     } catch (error) {
       console.error('Error skipping assessment:', error);
       throw error;
     }
   }
-  
-  /**
-   * Get assessment by ID
-   * @param {string} assessmentId - Assessment ID
-   * @returns {Promise<Object>} Assessment data
-   */
-  async getAssessmentById(assessmentId) {
-    try {
-      const assessment = await Assessment.findById(assessmentId);
-      if (!assessment) {
-        throw new Error('Assessment not found');
-      }
-      
-      return assessment;
-    } catch (error) {
-      console.error('Error getting assessment:', error);
-      throw error;
-    }
-  }
-  
+
   /**
    * Get assessments for a patient
    * @param {string} patientId - Patient ID
@@ -292,18 +227,18 @@ class AssessmentService {
   async getPatientAssessments(patientId, options = {}) {
     try {
       const { limit = 10, page = 1, sort = 'creationDate', order = -1 } = options;
-      
+
       const skip = (page - 1) * limit;
       const sortOptions = {};
       sortOptions[sort] = order;
-      
+
       const assessments = await Assessment.find({ patientId })
         .sort(sortOptions)
         .skip(skip)
         .limit(limit);
-      
+
       const total = await Assessment.countDocuments({ patientId });
-      
+
       return {
         assessments,
         pagination: {
@@ -318,26 +253,6 @@ class AssessmentService {
       throw error;
     }
   }
-  
-  /**
-   * Get assessment for a specific appointment
-   * @param {string} appointmentId - Appointment ID
-   * @returns {Promise<Object>} Assessment data
-   */
-  async getAssessmentByAppointment(appointmentId) {
-    try {
-      const assessment = await Assessment.findOne({ 
-        appointmentId,
-        status: { $ne: 'archived' }
-      });
-      
-      return assessment || null;
-    } catch (error) {
-      console.error('Error getting assessment by appointment:', error);
-      throw error;
-    }
-  }
 }
 
-const assessmentService = new AssessmentService();
-export default assessmentService; 
+export default new AssessmentService(); 

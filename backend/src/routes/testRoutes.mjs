@@ -264,19 +264,9 @@ router.route('/patients/:id/assessments/:assessmentId')
     assessmentController.getAssessment
   );
 
-router.route('/patients/:id/assessments/:assessmentId/questions')
-  .get(
-    assessmentController.getQuestions
-  );
-
 router.route('/patients/:id/assessments/:assessmentId/responses')
   .post(
-    assessmentController.saveResponses
-  );
-
-router.route('/patients/:id/assessments/:assessmentId/complete')
-  .post(
-    assessmentController.completeAssessment
+    assessmentController.submitAnswers
   );
 
 router.route('/patients/:id/assessments/:assessmentId/skip')

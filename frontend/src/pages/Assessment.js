@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -11,7 +11,6 @@ import {
   Paper,
   CircularProgress,
   Alert,
-  Divider,
   AppBar,
   Toolbar,
   IconButton
@@ -23,143 +22,64 @@ import QuestionForm from '../components/assessment/QuestionForm';
 import AssessmentReport from '../components/assessment/AssessmentReport';
 
 // Steps in the assessment process
-const steps = ['Report Symptoms', 'Answer Questions', 'Review Assessment'];
+const steps = ['Report Symptoms', 'Answer Questions', 'Assessment Submitted'];
 
 /**
- * Main assessment page component
+ * Main assessment page component for the AI-driven workflow
  */
 const Assessment = () => {
-  // Get patient ID and appointment ID from URL params
-  const { patientId, appointmentId } = useParams();
+  const { appointmentId } = useParams(); // We primarily need appointmentId
   const navigate = useNavigate();
 
   // Component state
   const [activeStep, setActiveStep] = useState(0);
   const [symptoms, setSymptoms] = useState([]);
   const [questions, setQuestions] = useState([]);
-  const [assessment, setAssessment] = useState(null);
+  const [assessmentId, setAssessmentId] = useState(null); // Store ID after starting
+  const [completedAssessment, setCompletedAssessment] = useState(null); // Store final data
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [notFound, setNotFound] = useState(false);
 
-  // Load existing assessment for this appointment if it exists
-  useEffect(() => {
-    if (appointmentId) {
-      const fetchAssessment = async () => {
-        try {
-          setLoading(true);
-          setError('');
-          const response = await assessmentService.getAssessmentByAppointment(appointmentId);
-          
-          if (response.data) {
-            setAssessment(response.data);
-            
-            // If assessment is already in progress or completed, set symptoms
-            if (response.data.symptoms && response.data.symptoms.length > 0) {
-              setSymptoms(response.data.symptoms);
-              
-              // If assessment has responses, move to appropriate step
-              if (response.data.status === 'completed') {
-                setActiveStep(2); // Move to final step
-              } else if (response.data.responses && response.data.responses.length > 0) {
-                setActiveStep(1); // Move to questions step
-                // Also fetch questions
-                const questionsResponse = await assessmentService.getQuestions(patientId, response.data._id);
-                setQuestions(questionsResponse.data);
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Error fetching assessment:', error);
-          // Don't show error if assessment just doesn't exist yet
-          if (error.response) {
-            if (error.response.status === 404) {
-              // Assessment not found is normal for a new assessment
-              setNotFound(true);
-            } else if (error.response.status === 400 && error.response.data?.message === 'Invalid appointment ID') {
-              setError('The appointment ID is invalid. Please go back and try again or contact support.');
-            } else {
-              setError('Failed to load assessment data. Please try again.');
-            }
-          } else {
-            setError('Network error. Please check your connection and try again.');
-          }
-        } finally {
-          setLoading(false);
-        }
-      };
-
-      fetchAssessment();
-    }
-  }, [appointmentId, patientId]);
+  // No useEffect needed to load existing assessment in this flow
 
   /**
-   * Handle next step button click
+   * Handle next step button click (from SymptomInput)
    */
-  const handleNext = async () => {
+  const handleStartAssessment = async () => {
     setError('');
-    
-    if (activeStep === 0) {
-      // Validate symptoms
-      if (symptoms.length === 0) {
-        setError('Please enter at least one symptom before continuing.');
-        return;
-      }
+    if (symptoms.length === 0) {
+      setError('Please enter at least one symptom before continuing.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      // Call the new startAssessment service method
+      const response = await assessmentService.startAssessment(appointmentId, symptoms);
       
-      try {
-        setLoading(true);
+      // Check if response and data exist and contain expected fields
+      if (response && response.data && response.data.data) {
+        const { assessmentId: newAssessmentId, questions: generatedQuestions } = response.data.data;
         
-        // Start or update assessment
-        let assessmentData;
-        
-        if (assessment && assessment._id) {
-          // Update existing assessment (this is a simplified approach)
-          // In a real app, you might need a specific endpoint to update symptoms
-          assessmentData = assessment;
-        } else {
-          // Start new assessment
-          try {
-            const response = await assessmentService.startAssessment(patientId, appointmentId, symptoms);
-            assessmentData = response.data;
-            setAssessment(assessmentData);
-          } catch (error) {
-            console.error('Error starting assessment:', error);
-            if (error.response) {
-              if (error.response.status === 400 && error.response.data?.message === 'Invalid appointment ID') {
-                setError('The appointment ID is invalid. This may be a system error - please contact support.');
-                return;
-              } else {
-                setError(error.response.data?.message || 'Failed to start assessment');
-                return;
-              }
-            } else {
-              setError('Network error. Please check your connection and try again.');
-              return;
-            }
-          }
+        if (!newAssessmentId || !Array.isArray(generatedQuestions)) {
+           console.error('Invalid data structure from startAssessment:', response.data.data);
+           throw new Error('Received invalid data after starting assessment.');
         }
-        
-        // Fetch questions based on symptoms
-        try {
-          const questionsResponse = await assessmentService.getQuestions(patientId, assessmentData._id);
-          setQuestions(questionsResponse.data);
-          
-          // Move to next step
-          setActiveStep(1);
-        } catch (error) {
-          console.error('Error fetching questions:', error);
-          setError('Failed to load questions. Please try again.');
-        }
-      } catch (error) {
-        console.error('General error:', error);
-        setError('An unexpected error occurred. Please try again.');
-      } finally {
-        setLoading(false);
+
+        setAssessmentId(newAssessmentId);
+        setQuestions(generatedQuestions);
+        setActiveStep(1); // Move to question step
+      } else {
+          console.error('Invalid response structure from startAssessment:', response);
+          throw new Error('Received invalid response structure after starting assessment.');
       }
-    } else if (activeStep === 1) {
-      // Next action handled by QuestionForm component
-    } else {
-      // Final step - no next action
+
+    } catch (err) {
+      console.error('Error starting assessment:', err);
+      const errorMsg = err.response?.data?.message || err.message || 'Failed to start assessment. Please try again.';
+      setError(errorMsg);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -167,70 +87,54 @@ const Assessment = () => {
    * Handle back button click
    */
   const handleBack = () => {
-    setActiveStep((prevStep) => prevStep - 1);
-  };
-
-  /**
-   * Handle form responses submission
-   * @param {Array} responses - Array of responses from QuestionForm
-   */
-  const handleResponsesSubmit = async (responses) => {
-    try {
-      setLoading(true);
-      setError('');
-      
-      // Save responses
-      await assessmentService.saveResponses(patientId, assessment._id, responses);
-      
-      // Complete the assessment to generate report
-      const completeResponse = await assessmentService.completeAssessment(patientId, assessment._id);
-      
-      // Update assessment with completed data
-      setAssessment(completeResponse.data);
-      
-      // Move to next step
-      setActiveStep(2);
-    } catch (error) {
-      console.error('Error submitting responses:', error);
-      
-      if (error.response) {
-        setError(error.response.data?.message || 'Failed to submit your responses. Please try again.');
-      } else {
-        setError('Network error. Please check your connection and try again.');
-      }
-    } finally {
-      setLoading(false);
+    // Only allow back from Question step to Symptom step
+    if (activeStep === 1) {
+       setActiveStep((prevStep) => prevStep - 1);
+       setError(''); // Clear errors when going back
     }
   };
 
   /**
-   * Handle skip assessment
+   * Handle form responses submission from QuestionForm
+   * @param {Array} answers - Array of { questionId: string, answer: any }
    */
-  const handleSkipAssessment = async () => {
-    if (!assessment || !assessment._id) {
-      navigate(-1); // Just go back if no assessment started
+  const handleQuestionSubmit = async (answers) => {
+    if (!assessmentId) {
+      setError('Assessment ID is missing. Cannot submit answers.');
       return;
     }
     
     try {
       setLoading(true);
-      await assessmentService.skipAssessment(
-        patientId, 
-        assessment._id, 
-        'Patient chose to skip the assessment'
-      );
-      navigate(`/appointments/${appointmentId}`);
-    } catch (error) {
-      console.error('Error skipping assessment:', error);
+      setError('');
       
-      if (error.response) {
-        setError(error.response.data?.message || 'Failed to skip assessment. Please try again.');
+      // Call the new submitAnswers service method
+      const response = await assessmentService.submitAnswers(assessmentId, answers);
+
+      if (response && response.data && response.data.data) {
+        setCompletedAssessment(response.data.data); // Store the final assessment data
+        setActiveStep(2); // Move to final step
       } else {
-        setError('Network error. Please check your connection and try again.');
+         console.error('Invalid response structure from submitAnswers:', response);
+         throw new Error('Received invalid response structure after submitting answers.');
       }
+
+    } catch (err) {
+      console.error('Error submitting answers:', err);
+       const errorMsg = err.response?.data?.message || err.message || 'Failed to submit your answers. Please try again.';
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Skip assessment logic might need adjustment based on UX requirements
+  // For now, it could navigate back or to the appointment details.
+  const handleSkip = () => {
+      console.log("Assessment skipped by user.");
+      // Optionally call skipAssessment service endpoint if backend logic requires it
+      // await assessmentService.skipAssessment(assessmentId, 'User skipped', req.user?._id);
+      navigate(`/appointments/${appointmentId}`); // Navigate to appointment details
   };
 
   /**
@@ -243,132 +147,119 @@ const Assessment = () => {
           <SymptomInput 
             symptoms={symptoms} 
             setSymptoms={setSymptoms} 
+            // We don't need onSubmit here, use the main Next button
           />
         );
       case 1:
         return (
           <QuestionForm 
             questions={questions} 
-            onSubmit={handleResponsesSubmit} 
-            loading={loading}
+            onSubmit={handleQuestionSubmit} 
+            onSkip={handleSkip} // Add skip handler
+            isLoading={loading} // Pass loading state
           />
         );
       case 2:
         return (
-          <AssessmentReport assessment={assessment} />
+           <Box sx={{ textAlign: 'center', mt: 4 }}>
+              <Typography variant="h5" gutterBottom>Assessment Submitted!</Typography>
+              <Typography sx={{ mb: 2 }}>
+                Thank you for completing the preliminary assessment. Your doctor will review this information.
+              </Typography>
+              {/* Optionally show a brief summary or the report here */} 
+              {/* {completedAssessment && <AssessmentReport assessment={completedAssessment} />} */}
+              <Button 
+                  variant="contained" 
+                  onClick={() => navigate(`/appointments/${appointmentId}`)} // Navigate back to appointment details
+              >
+                  View Appointment Details
+              </Button>
+            </Box>
         );
       default:
-        return 'Unknown step';
+        return <Typography>Unknown step</Typography>;
     }
   };
 
   return (
-    <Box sx={{ flexGrow: 1 }}>
-      <AppBar position="static" color="default" elevation={0}>
+    <Container maxWidth="md" sx={{ mt: 4, mb: 4 }}>
+      <AppBar position="static" color="transparent" elevation={0} sx={{ mb: 2 }}>
         <Toolbar>
-          <IconButton
-            edge="start"
-            color="inherit"
-            onClick={() => navigate(-1)}
-            aria-label="back"
-          >
+          <IconButton edge="start" color="inherit" onClick={() => navigate(-1)} aria-label="back">
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            Pre-Appointment Assessment
+          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+            Preliminary Assessment
           </Typography>
-          {activeStep < 2 && (
-            <Button color="inherit" onClick={handleSkipAssessment}>
-              Skip Assessment
-            </Button>
-          )}
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="md" sx={{ mt: 4, mb: 8 }}>
-        {error && error.includes('invalid') ? (
-          <Paper elevation={3} sx={{ p: 3, mb: 4 }}>
-            <Typography variant="h5" gutterBottom align="center" color="error">
-              Error
-            </Typography>
-            <Alert severity="error" sx={{ mb: 3 }}>
-              {error}
-            </Alert>
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={() => navigate(-1)}
-              >
-                Return to Previous Page
-              </Button>
-            </Box>
-          </Paper>
-        ) : (
-          <Paper elevation={3} sx={{ p: 3, mb: 4 }}>
-            <Typography variant="h5" gutterBottom align="center">
-              AI-Powered Health Assessment
-            </Typography>
-            <Typography variant="body1" align="center" color="text.secondary" sx={{ mb: 3 }}>
-              This assessment helps your doctor understand your symptoms before your appointment.
-            </Typography>
-            
-            <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 4 }}>
-              {steps.map((label) => (
-                <Step key={label}>
-                  <StepLabel>{label}</StepLabel>
-                </Step>
-              ))}
-            </Stepper>
-            
-            {error && (
-              <Alert severity="error" sx={{ mb: 3 }}>
-                {error}
-              </Alert>
-            )}
-            
-            {loading && activeStep !== 1 ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4, mb: 4 }}>
-                <CircularProgress />
-              </Box>
-            ) : (
-              renderStepContent()
-            )}
-            
-            {activeStep === 0 && (
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleNext}
-                  disabled={loading || symptoms.length === 0}
-                >
-                  Next
-                </Button>
-              </Box>
-            )}
-            
-            {activeStep === 2 && (
-              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={() => navigate(`/appointments/${appointmentId}`)}
-                >
-                  Return to Appointment
-                </Button>
-              </Box>
-            )}
-          </Paper>
-        )}
-        
-        {activeStep === 0 && !error.includes('invalid') && (
-          <Alert severity="info">
-            Start by entering the symptoms you're experiencing. Be as specific as possible to help our AI generate relevant questions.
+      <Paper sx={{ p: { xs: 2, md: 3 } }}>
+        <Typography variant="h4" gutterBottom align="center">
+          {steps[activeStep]}
+        </Typography>
+
+        <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 4 }}>
+          {steps.map((label) => (
+            <Step key={label}>
+              <StepLabel>{label}</StepLabel>
+            </Step>
+          ))}
+        </Stepper>
+
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
           </Alert>
         )}
-      </Container>
-    </Box>
+
+        {loading && activeStep < 2 && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', my: 3 }}>
+            <CircularProgress />
+          </Box>
+        )}
+
+        {!loading && renderStepContent()}
+
+        {/* Navigation Buttons - Adjusted Logic */}
+        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', mt: 4 }}>
+          <Button
+            color="inherit"
+            disabled={activeStep === 0 || activeStep === 2 || loading} // Disable back on first/last step or loading
+            onClick={handleBack}
+            sx={{ mr: { sm: 1 }, mb: { xs: 1, sm: 0 } }}
+          >
+            Back
+          </Button>
+          
+          {/* Show Skip button only on Question step */} 
+          {activeStep === 1 && (
+              <Button 
+                  onClick={handleSkip}
+                  disabled={loading}
+                  color="secondary"
+                  sx={{ mr: { sm: 1 }, mb: { xs: 1, sm: 0 } }}
+              >
+                Skip Assessment
+              </Button>
+          )}
+
+          {/* Show Next button only on Symptom step */} 
+          {activeStep === 0 && (
+            <Button
+              variant="contained"
+              onClick={handleStartAssessment}
+              disabled={loading || symptoms.length === 0}
+            >
+              Next
+            </Button>
+          )}
+          
+          {/* Submit button is within QuestionForm for Step 1 */} 
+          {/* Completion step has its own button */} 
+        </Box>
+      </Paper>
+    </Container>
   );
 };
 

@@ -1,249 +1,227 @@
 import assessmentService from '../services/assessmentService.mjs';
 import { ApiResponse, ApiError } from '../utils/apiResponse.mjs';
 import { validateObjectId } from '../utils/validation.mjs';
+import mongoose from 'mongoose';
 
 /**
  * Controller for handling assessment-related API endpoints
  */
 class AssessmentController {
   /**
-   * Start a new assessment for a patient
-   * @param {Object} req - Express request object
+   * Start a new assessment, generate questions, and return them.
+   * Assumes patientId might come from authenticated user or request body.
+   * @param {Object} req - Express request object (body: { appointmentId, symptoms, patientId? })
    * @param {Object} res - Express response object
    * @param {Function} next - Express next middleware function
    */
   async startAssessment(req, res, next) {
     try {
       const { appointmentId, symptoms } = req.body;
-      const { id: patientId } = req.params;
-      
-      // Validate inputs
-      if (!validateObjectId(appointmentId)) {
-        return next(new ApiError('Invalid appointment ID', 400));
+      const { id: patientIdFromParam } = req.params; // Get patient ID from URL param
+      const userId = req.user?._id; // ID of the user performing the action (for audit)
+
+      // Use patientId from URL parameter primarily
+      const patientId = patientIdFromParam; 
+
+      if (!userId) {
+         return next(new ApiError('User authentication required to start assessment', 401));
       }
-      
+      if (!patientId) {
+          return next(new ApiError('Patient ID is required in the URL', 400));
+      }
+      if (!validateObjectId(appointmentId)) {
+        return next(new ApiError('Invalid or missing appointment ID', 400));
+      }
       if (!validateObjectId(patientId)) {
         return next(new ApiError('Invalid patient ID', 400));
       }
-      
-      if (!symptoms || !Array.isArray(symptoms)) {
-        return next(new ApiError('Symptoms must be provided as an array', 400));
+      if (!symptoms || !Array.isArray(symptoms) || symptoms.length === 0) {
+        return next(new ApiError('Symptoms must be provided as a non-empty array', 400));
       }
-      
-      // Create assessment with user ID for audit logging
-      // For testing without auth, use a placeholder user ID
-      const assessmentData = {
+
+      // Call the service to start assessment and get questions
+      const { assessmentId, questions } = await assessmentService.startAssessment(
         patientId,
         appointmentId,
         symptoms,
-        userId: req.user ? req.user._id : '64a3d2f78b008f15d8e6723c' // Use placeholder ID if no user
-      };
-      
-      const assessment = await assessmentService.startAssessment(assessmentData);
-      
+        userId // Pass user ID for audit log
+      );
+
       return res.status(201).json(
-        new ApiResponse(true, 'Assessment started successfully', assessment)
+        new ApiResponse(true, 'Assessment started, questions generated', { assessmentId, questions })
       );
     } catch (error) {
-      return next(new ApiError(error.message, 500));
+      console.error("Start Assessment Controller Error:", error);
+      return next(new ApiError(error.message, error.statusCode || 500));
     }
   }
   
   /**
-   * Generate questions for a specific assessment
-   * @param {Object} req - Express request object
+   * Submit answers, generate and save the AI report.
+   * @param {Object} req - Express request object (params: {id}, body: { answers })
    * @param {Object} res - Express response object
    * @param {Function} next - Express next middleware function
    */
-  async getQuestions(req, res, next) {
+  async submitAnswers(req, res, next) {
     try {
-      const { id: patientId, assessmentId } = req.params;
-      
-      // Validate assessment ID
+      const { id: assessmentId } = req.params; 
+      const { answers } = req.body;
+      const userId = req.user?._id; // ID of the user performing the action
+
+      if (!userId) {
+         return next(new ApiError('User authentication required', 401));
+      }
       if (!validateObjectId(assessmentId)) {
         return next(new ApiError('Invalid assessment ID', 400));
       }
-      
-      const questions = await assessmentService.generateQuestions(assessmentId);
-      
+      if (!answers || !Array.isArray(answers)) {
+        return next(new ApiError('Answers must be provided as an array', 400));
+      }
+
+      // Call service to save answers and generate report
+      const completedAssessment = await assessmentService.submitAnswersAndGenerateReport(
+          assessmentId, 
+          answers, 
+          userId
+      );
+
       return res.status(200).json(
-        new ApiResponse(true, 'Questions generated successfully', questions)
+        new ApiResponse(true, 'Answers submitted and report generated successfully', completedAssessment)
       );
     } catch (error) {
-      return next(new ApiError(error.message, 500));
+      console.error("Submit Answers Controller Error:", error);
+      return next(new ApiError(error.message, error.statusCode || 500));
     }
   }
-  
+
   /**
-   * Save responses to assessment questions
-   * @param {Object} req - Express request object
-   * @param {Object} res - Express response object
-   * @param {Function} next - Express next middleware function
-   */
-  async saveResponses(req, res, next) {
-    try {
-      const { id: patientId, assessmentId } = req.params;
-      const { responses } = req.body;
-      
-      // Validate assessment ID
-      if (!validateObjectId(assessmentId)) {
-        return next(new ApiError('Invalid assessment ID', 400));
-      }
-      
-      // Validate responses
-      if (!responses || !Array.isArray(responses)) {
-        return next(new ApiError('Responses must be provided as an array', 400));
-      }
-      
-      const assessment = await assessmentService.saveResponses(assessmentId, responses);
-      
-      return res.status(200).json(
-        new ApiResponse(true, 'Responses saved successfully', assessment)
-      );
-    } catch (error) {
-      return next(new ApiError(error.message, 500));
-    }
-  }
-  
-  /**
-   * Complete an assessment and generate report
-   * @param {Object} req - Express request object
-   * @param {Object} res - Express response object
-   * @param {Function} next - Express next middleware function
-   */
-  async completeAssessment(req, res, next) {
-    try {
-      const { id: patientId, assessmentId } = req.params;
-      
-      // Validate assessment ID
-      if (!validateObjectId(assessmentId)) {
-        return next(new ApiError('Invalid assessment ID', 400));
-      }
-      
-      const assessment = await assessmentService.completeAssessment(assessmentId);
-      
-      return res.status(200).json(
-        new ApiResponse(true, 'Assessment completed successfully', assessment)
-      );
-    } catch (error) {
-      return next(new ApiError(error.message, 500));
-    }
-  }
-  
-  /**
-   * Skip an assessment
-   * @param {Object} req - Express request object
+   * Skip an assessment.
+   * @param {Object} req - Express request object (params: {id}, body: { reason })
    * @param {Object} res - Express response object
    * @param {Function} next - Express next middleware function
    */
   async skipAssessment(req, res, next) {
     try {
-      const { id: patientId, assessmentId } = req.params;
+      const { id: assessmentId } = req.params; // Assuming route is /assessments/:id/skip
       const { reason } = req.body;
-      
-      // Validate assessment ID
+      const userId = req.user?._id; // ID of the user performing the action
+
+      if (!userId) {
+         return next(new ApiError('User authentication required', 401));
+      }
       if (!validateObjectId(assessmentId)) {
         return next(new ApiError('Invalid assessment ID', 400));
       }
-      
-      const assessment = await assessmentService.skipAssessment(assessmentId, reason);
-      
+
+      const assessment = await assessmentService.skipAssessment(assessmentId, reason, userId);
+
       return res.status(200).json(
         new ApiResponse(true, 'Assessment skipped successfully', assessment)
       );
     } catch (error) {
-      return next(new ApiError(error.message, 500));
+       console.error("Skip Assessment Controller Error:", error);
+      return next(new ApiError(error.message, error.statusCode || 500));
     }
   }
-  
+
   /**
-   * Get assessment by ID
-   * @param {Object} req - Express request object
+   * Get assessment by Assessment ID.
+   * @param {Object} req - Express request object (params: {id})
    * @param {Object} res - Express response object
    * @param {Function} next - Express next middleware function
    */
   async getAssessment(req, res, next) {
     try {
-      const { id: patientId, assessmentId } = req.params;
+      const { id: assessmentId } = req.params; // Assuming route is /assessments/:id
       
-      // Validate assessment ID
       if (!validateObjectId(assessmentId)) {
         return next(new ApiError('Invalid assessment ID', 400));
       }
-      
+
+      // TODO: Add permission check - only involved parties or admin/staff
+
       const assessment = await assessmentService.getAssessmentById(assessmentId);
-      
+
       return res.status(200).json(
         new ApiResponse(true, 'Assessment retrieved successfully', assessment)
       );
     } catch (error) {
-      return next(new ApiError(error.message, 500));
+      console.error("Get Assessment Controller Error:", error);
+      return next(new ApiError(error.message, error.statusCode || 500));
     }
   }
-  
+
   /**
-   * Get all assessments for a patient
-   * @param {Object} req - Express request object
+   * Get assessment for a specific appointment.
+   * @param {Object} req - Express request object (params: {appointmentId})
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async getAssessmentByAppointment(req, res, next) {
+    try {
+      const { appointmentId } = req.params; // Assuming route is /appointments/:appointmentId/assessment
+
+      if (!validateObjectId(appointmentId)) {
+        return next(new ApiError('Invalid appointment ID', 400));
+      }
+
+      // TODO: Add permission check - only involved parties or admin/staff
+
+      const assessment = await assessmentService.getAssessmentForAppointment(appointmentId);
+
+      if (!assessment) {
+        // It's not an error if no assessment exists, just return empty
+        return res.status(200).json(
+          new ApiResponse(true, 'No assessment found for this appointment', null)
+        );
+      }
+
+      return res.status(200).json(
+        new ApiResponse(true, 'Assessment retrieved successfully', assessment)
+      );
+    } catch (error) {
+       console.error("Get Assessment By Appointment Controller Error:", error);
+      return next(new ApiError(error.message, error.statusCode || 500));
+    }
+  }
+
+  /**
+   * Get all assessments for a specific patient (paginated).
+   * @param {Object} req - Express request object (params: {patientId}, query: { page, limit, sort, order })
    * @param {Object} res - Express response object
    * @param {Function} next - Express next middleware function
    */
   async getPatientAssessments(req, res, next) {
     try {
-      const { id: patientId } = req.params;
+      const { patientId } = req.params; // Assuming route is /patients/:patientId/assessments
       const { page, limit, sort, order } = req.query;
       
-      // Validate patient ID
       if (!validateObjectId(patientId)) {
         return next(new ApiError('Invalid patient ID', 400));
       }
-      
+
+      // TODO: Add permission check - only patient themselves or admin/staff/doctor
+
       const options = {
         page: parseInt(page) || 1,
         limit: parseInt(limit) || 10,
         sort: sort || 'creationDate',
         order: order === 'asc' ? 1 : -1
       };
-      
+
       const result = await assessmentService.getPatientAssessments(patientId, options);
-      
+
       return res.status(200).json(
-        new ApiResponse(true, 'Assessments retrieved successfully', result)
+        new ApiResponse(true, 'Patient assessments retrieved successfully', result)
       );
     } catch (error) {
-      return next(new ApiError(error.message, 500));
-    }
-  }
-  
-  /**
-   * Get assessment for a specific appointment
-   * @param {Object} req - Express request object
-   * @param {Object} res - Express response object
-   * @param {Function} next - Express next middleware function
-   */
-  async getAssessmentByAppointment(req, res, next) {
-    try {
-      const { appointmentId } = req.params;
-      
-      // Validate appointment ID
-      if (!validateObjectId(appointmentId)) {
-        return next(new ApiError('Invalid appointment ID', 400));
-      }
-      
-      const assessment = await assessmentService.getAssessmentByAppointment(appointmentId);
-      
-      if (!assessment) {
-        return res.status(404).json(
-          new ApiResponse(false, 'No assessment found for this appointment', null)
-        );
-      }
-      
-      return res.status(200).json(
-        new ApiResponse(true, 'Assessment retrieved successfully', assessment)
-      );
-    } catch (error) {
-      return next(new ApiError(error.message, 500));
+       console.error("Get Patient Assessments Controller Error:", error);
+      return next(new ApiError(error.message, error.statusCode || 500));
     }
   }
 }
+
+// Helper can likely be removed if not needed elsewhere, assuming patientService handles this
+// assessmentService.getPatientIdForUser = async function(userId) { ... };
 
 export default new AssessmentController(); 

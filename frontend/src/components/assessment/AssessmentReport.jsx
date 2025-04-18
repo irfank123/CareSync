@@ -86,90 +86,64 @@ const AssessmentReport = ({ assessment }) => {
         AI Assessment Report
       </Typography>
 
-      {parseError ? (
-        <Paper elevation={2} sx={{ p: 3, my: 3 }}>
-          <Typography variant="body1">
-            {assessment.aiGeneratedReport || 'No report data available.'}
+      {/* Display Severity Chip prominently */}
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, mt: 1 }}>
+          <Typography variant="subtitle1" sx={{ mr: 1 }}>
+             Overall Severity:
           </Typography>
-        </Paper>
-      ) : (
-        <Box>
-          <Grid container spacing={3} sx={{ mb: 4 }}>
-            <Grid item xs={12} md={6}>
-              <Card variant="outlined">
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    Assessment Summary
-                  </Typography>
-                  <Divider sx={{ mb: 2 }} />
-                  
-                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                    <Typography variant="subtitle1" sx={{ mr: 1 }}>
-                      Severity:
-                    </Typography>
-                    <Chip
-                      icon={getSeverityIcon(assessment.severity)}
-                      label={assessment.severity || 'Not specified'}
-                      color={getSeverityColor(assessment.severity)}
-                      variant="outlined"
-                    />
-                  </Box>
-                  
-                  <Typography variant="body1" sx={{ mb: 2 }}>
-                    {reportData.summary || 'No summary available.'}
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            
-            <Grid item xs={12} md={6}>
-              <Card variant="outlined">
-                <CardContent>
-                  <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
-                    <MedicalServicesIcon sx={{ mr: 1 }} />
-                    Possible Conditions
-                  </Typography>
-                  <Divider sx={{ mb: 2 }} />
-                  
-                  {reportData.possibleConditions && reportData.possibleConditions.length > 0 ? (
-                    <List dense>
-                      {reportData.possibleConditions.map((condition, index) => (
-                        <ListItem key={index} sx={{ py: 0.5 }}>
-                          <ListItemText
-                            primary={condition.name}
-                            secondary={condition.description}
-                          />
-                        </ListItem>
-                      ))}
-                    </List>
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">
-                      No conditions specified in the report.
-                    </Typography>
-                  )}
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-
-          <Paper elevation={2} sx={{ p: 3, mb: 4 }}>
-            <Typography variant="h6" gutterBottom>
-              Detailed Analysis
-            </Typography>
-            <Divider sx={{ mb: 2 }} />
-            
-            <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-              {reportData.analysis || assessment.aiGeneratedReport || 'No detailed analysis available.'}
-            </Typography>
-          </Paper>
-
-          <Alert severity="info" sx={{ mb: 3 }}>
-            This AI-generated assessment is for informational purposes only and does not constitute medical advice. 
-            Please consult with your healthcare provider for proper diagnosis and treatment recommendations.
-          </Alert>
+          <Chip
+            icon={getSeverityIcon(assessment.severity)}
+            label={assessment.severity || 'Not assessed'}
+            color={getSeverityColor(assessment.severity)}
+            variant="outlined"
+            size="small"
+          />
         </Box>
-      )}
 
+      {/* Display AI Generated Report Text */}
+      <Paper elevation={2} sx={{ p: 3, my: 3 }}>
+         <Typography variant="h6" gutterBottom>AI Analysis</Typography>
+         <Divider sx={{ mb: 2 }}/>
+         {parseError ? (
+            <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+              {/* Show raw string if parsing failed */} 
+              {assessment.aiGeneratedReport || 'Report data could not be processed.'}
+            </Typography>
+         ) : (
+            <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
+              {/* Use parsed report data if available, otherwise fallback */} 
+              {reportData.report || reportData.analysis || assessment.aiGeneratedReport || 'No detailed analysis available.'}
+            </Typography>
+         )}
+      </Paper>
+
+      {/* Key Points / Recommendations (if available in parsed report) */}
+      {reportData.keyPoints || reportData.recommendedFollowUp ? (
+         <Card variant="outlined" sx={{ mb: 3 }}>
+          <CardContent>
+             {reportData.keyPoints && (
+               <Box mb={2}>
+                  <Typography variant="subtitle1" gutterBottom>Key Points:</Typography>
+                  <List dense>
+                    {reportData.keyPoints.map((point, index) => (
+                      <ListItem key={index} sx={{ py: 0 }}>
+                          <ListItemText primary={`• ${point}`} />
+                      </ListItem>
+                    ))}
+                  </List>
+               </Box>
+             )}
+             {reportData.recommendedFollowUp && (
+               <Box>
+                  <Typography variant="subtitle1" gutterBottom>Recommended Follow-Up:</Typography>
+                  <Typography variant="body2" color="text.secondary">{reportData.recommendedFollowUp}</Typography>
+               </Box>
+             )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Reported Symptoms */}
       <Box sx={{ mt: 4 }}>
         <Typography variant="h6" gutterBottom>
           Reported Symptoms
@@ -189,25 +163,39 @@ const AssessmentReport = ({ assessment }) => {
         </Paper>
       </Box>
 
-      {assessment.responses && assessment.responses.length > 0 && (
+      {/* Generated Questions and Patient Answers */}
+      {assessment.generatedQuestions && assessment.generatedQuestions.length > 0 && (
         <Box sx={{ mt: 4 }}>
           <Typography variant="h6" gutterBottom>
-            Patient Responses
+            Assessment Q&A
           </Typography>
           <List>
-            {assessment.responses.map((response, index) => (
-              <Paper key={index} variant="outlined" sx={{ mb: 2, p: 2 }}>
-                <Typography variant="subtitle1" gutterBottom>
-                  Q: {response.question}
-                </Typography>
-                <Typography variant="body1" color="text.secondary">
-                  A: {response.answer}
-                </Typography>
-              </Paper>
-            ))}
+            {assessment.generatedQuestions.map((question, index) => {
+              // Find the corresponding response using questionId
+              const response = assessment.responses?.find(r => r.questionId === question.questionId);
+              const answerText = response ? 
+                                  (typeof response.answer === 'boolean' ? (response.answer ? 'Yes' : 'No') : String(response.answer)) 
+                                  : '-'; // Display '-' if no answer found
+
+              return (
+                <Paper key={question.questionId || index} variant="outlined" sx={{ mb: 2, p: 2 }}>
+                  <Typography variant="subtitle1" gutterBottom>
+                    Q: {question.question}
+                  </Typography>
+                  <Typography variant="body1" color="text.secondary">
+                    A: {answerText}
+                  </Typography>
+                </Paper>
+              );
+            })}
           </List>
         </Box>
       )}
+
+       <Alert severity="info" sx={{ mt: 3 }}>
+          This AI-generated assessment is for informational purposes only and does not constitute medical advice. 
+          Please consult with your healthcare provider for proper diagnosis and treatment recommendations.
+        </Alert>
     </Box>
   );
 };
