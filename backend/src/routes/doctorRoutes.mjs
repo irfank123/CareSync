@@ -1,6 +1,7 @@
 // src/routes/doctorRoutes.mjs
 
 import express from 'express';
+import mongoose from 'mongoose';
 import {
   getDoctorsWithDI,
   getDoctorWithDI,
@@ -45,20 +46,30 @@ router.get(
       });
       
       const { Doctor } = await import('../models/index.mjs');
-      console.log('Looking up doctor with userId:', req.params.userId);
+      const userId = req.params.userId;
+      console.log('Looking up doctor with userId:', userId);
       
-      const doctor = await Doctor.findOne({ userId: req.params.userId });
+      // Ensure the userId is a valid ObjectId
+      if (!mongoose.Types.ObjectId.isValid(userId)) {
+        console.log('Invalid userId format:', userId);
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid user ID format'
+        });
+      }
+      
+      const doctor = await Doctor.findOne({ userId: new mongoose.Types.ObjectId(userId) });
       console.log('Doctor lookup result:', doctor ? 'Found' : 'Not found');
       
       if (!doctor) {
-        console.log('Doctor not found for userId:', req.params.userId);
+        console.log('Doctor not found for userId:', userId);
         return res.status(404).json({
           success: false,
           message: 'Doctor not found for this user'
         });
       }
       
-      console.log('Returning doctor info for userId:', req.params.userId, 'doctorId:', doctor._id);
+      console.log('Returning doctor info for userId:', userId, 'doctorId:', doctor._id);
       res.status(200).json({
         success: true,
         data: doctor
@@ -67,7 +78,8 @@ router.get(
       console.error('Error fetching doctor by user ID:', err);
       res.status(500).json({
         success: false,
-        message: 'Error fetching doctor profile'
+        message: 'Error fetching doctor profile',
+        error: process.env.NODE_ENV === 'development' ? err.message : undefined
       });
     }
   }

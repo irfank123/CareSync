@@ -60,7 +60,18 @@ class AppointmentService {
       
       // Filter by doctor if provided
       if (doctorId) {
-        matchConditions.doctorId = mongoose.Types.ObjectId(doctorId);
+        try {
+          if (mongoose.Types.ObjectId.isValid(doctorId)) {
+            matchConditions.doctorId = new mongoose.Types.ObjectId(doctorId);
+            console.log('Using doctorId in query:', doctorId);
+          } else {
+            console.error('Invalid doctorId format in service:', doctorId);
+            throw new Error('Invalid doctor ID format');
+          }
+        } catch (err) {
+          console.error('Error converting doctorId to ObjectId:', err);
+          throw new Error('Invalid doctor ID format: ' + err.message);
+        }
       }
       
       // Filter by patient if provided
@@ -854,20 +865,72 @@ async createAppointment(appointmentData, userId) {
       // Current date
       const currentDate = new Date();
       
-      // Get appointments
-      const appointments = await Appointment.find({
-        patientId,
-        date: { $gte: currentDate },
-        status: { $in: ['scheduled', 'checked-in'] }
-      })
-      .sort({ date: 1, startTime: 1 })
-      .populate({
-        path: 'doctorId',
-        populate: {
-          path: 'userId',
-          select: 'firstName lastName email'
+      // Ensure patientId is a valid ObjectId
+      const patId = mongoose.Types.ObjectId(patientId);
+      
+      // Use aggregate for consistent result format
+      const appointments = await Appointment.aggregate([
+        {
+          $match: {
+            patientId: patId,
+            date: { $gte: currentDate },
+            status: { $in: ['scheduled', 'checked-in'] }
+          }
+        },
+        {
+          $sort: { date: 1, startTime: 1 }
+        },
+        {
+          $lookup: {
+            from: 'doctors',
+            localField: 'doctorId',
+            foreignField: '_id',
+            as: 'doctor'
+          }
+        },
+        {
+          $unwind: {
+            path: '$doctor',
+            preserveNullAndEmptyArrays: true
+          }
+        },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'doctor.userId',
+            foreignField: '_id',
+            as: 'doctorUser'
+          }
+        },
+        {
+          $unwind: {
+            path: '$doctorUser',
+            preserveNullAndEmptyArrays: true
+          }
+        },
+        {
+          $project: {
+            _id: 1,
+            patientId: 1,
+            doctorId: 1,
+            timeSlotId: 1, 
+            date: 1,
+            startTime: 1,
+            endTime: 1,
+            type: 1,
+            status: 1,
+            notes: 1,
+            reasonForVisit: 1,
+            isVirtual: 1,
+            videoConferenceLink: 1,
+            'doctor._id': 1,
+            'doctorUser._id': 1,
+            'doctorUser.firstName': 1,
+            'doctorUser.lastName': 1,
+            'doctorUser.email': 1
+          }
         }
-      });
+      ]);
       
       return appointments;
     } catch (error) {
@@ -886,20 +949,72 @@ async createAppointment(appointmentData, userId) {
       // Current date
       const currentDate = new Date();
       
-      // Get appointments
-      const appointments = await Appointment.find({
-        doctorId,
-        date: { $gte: currentDate },
-        status: { $in: ['scheduled', 'checked-in'] }
-      })
-      .sort({ date: 1, startTime: 1 })
-      .populate({
-        path: 'patientId',
-        populate: {
-          path: 'userId',
-          select: 'firstName lastName email'
+      // Ensure doctorId is a valid ObjectId
+      const docId = mongoose.Types.ObjectId(doctorId);
+      
+      // Use aggregate for consistent result format
+      const appointments = await Appointment.aggregate([
+        {
+          $match: {
+            doctorId: docId,
+            date: { $gte: currentDate },
+            status: { $in: ['scheduled', 'checked-in'] }
+          }
+        },
+        {
+          $sort: { date: 1, startTime: 1 }
+        },
+        {
+          $lookup: {
+            from: 'patients',
+            localField: 'patientId',
+            foreignField: '_id',
+            as: 'patient'
+          }
+        },
+        {
+          $unwind: {
+            path: '$patient',
+            preserveNullAndEmptyArrays: true
+          }
+        },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'patient.userId',
+            foreignField: '_id',
+            as: 'patientUser'
+          }
+        },
+        {
+          $unwind: {
+            path: '$patientUser',
+            preserveNullAndEmptyArrays: true
+          }
+        },
+        {
+          $project: {
+            _id: 1,
+            patientId: 1,
+            doctorId: 1,
+            timeSlotId: 1,
+            date: 1,
+            startTime: 1,
+            endTime: 1,
+            type: 1,
+            status: 1,
+            notes: 1,
+            reasonForVisit: 1,
+            isVirtual: 1,
+            videoConferenceLink: 1,
+            'patient._id': 1,
+            'patientUser._id': 1,
+            'patientUser.firstName': 1,
+            'patientUser.lastName': 1,
+            'patientUser.email': 1
+          }
         }
-      });
+      ]);
       
       return appointments;
     } catch (error) {
@@ -921,6 +1036,9 @@ async createAppointment(appointmentData, userId) {
       
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
+      
+      // Convert clinicId to ObjectId
+      const clinicObjId = mongoose.Types.ObjectId(clinicId);
       
       // Use aggregation to get appointments with clinic filter
       const appointments = await Appointment.aggregate([
@@ -989,8 +1107,8 @@ async createAppointment(appointmentData, userId) {
         {
           $match: {
             $or: [
-              { 'doctorUser.clinicId': mongoose.Types.ObjectId(clinicId) },
-              { 'patientUser.clinicId': mongoose.Types.ObjectId(clinicId) }
+              { 'doctorUser.clinicId': clinicObjId },
+              { 'patientUser.clinicId': clinicObjId }
             ]
           }
         },

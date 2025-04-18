@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   Box,
@@ -25,6 +25,8 @@ import {
   TableHead,
   TableRow,
   Paper,
+  CircularProgress,
+  Alert,
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import {
@@ -39,52 +41,53 @@ import {
   Cancel,
   Schedule,
 } from '@mui/icons-material';
+import { appointmentService } from '../services/api';
+import { format } from 'date-fns';
 
 const Dashboard = () => {
   const { user } = useAuth();
   const [selectedTab, setSelectedTab] = useState(0);
-  // Temporarily force doctor view for testing
-  const isDoctor = false; // Change this to false to see patient view
+  const isDoctor = user?.role === 'doctor';
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [upcomingAppointments, setUpcomingAppointments] = useState([]);
 
-  // Mock data for doctor's dashboard
+  // Fetch upcoming appointments
+  useEffect(() => {
+    const fetchUpcomingAppointments = async () => {
+      try {
+        setLoading(true);
+        const response = await appointmentService.getUpcomingAppointments();
+        setUpcomingAppointments(response.data.data || []);
+      } catch (err) {
+        console.error('Error fetching appointments:', err);
+        setError('Failed to load appointments data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUpcomingAppointments();
+  }, []);
+
+  // Mock data for statistics
   const doctorStats = {
-    appointments: 12,
+    appointments: upcomingAppointments.length || 0,
     patients: 45,
-    upcomingToday: 5,
+    upcomingToday: upcomingAppointments.filter(apt => 
+      new Date(apt.date).toDateString() === new Date().toDateString()
+    ).length || 0,
     pendingReviews: 3,
   };
 
   const patientStats = {
-    upcomingAppointments: 2,
+    upcomingAppointments: upcomingAppointments.length || 0,
     prescriptions: 3,
     testResults: 1,
     notifications: 2,
   };
 
-  const todayAppointments = [
-    {
-      id: 1,
-      time: '10:00 AM',
-      patient: 'John Doe',
-      type: 'General Checkup',
-      status: 'upcoming',
-    },
-    {
-      id: 2,
-      time: '11:30 AM',
-      patient: 'Jane Smith',
-      type: 'Follow-up',
-      status: 'completed',
-    },
-    {
-      id: 3,
-      time: '2:00 PM',
-      patient: 'Alice Johnson',
-      type: 'Consultation',
-      status: 'upcoming',
-    },
-  ];
-
+  // Mock data for doctor's dashboard
   const recentPatients = [
     {
       id: 1,
@@ -174,19 +177,31 @@ const Dashboard = () => {
   ];
 
   const getStatusChip = (status) => {
+    const statusMapping = {
+      'scheduled': 'upcoming',
+      'checked-in': 'in-progress',
+      'in-progress': 'in-progress',
+      'completed': 'completed',
+      'cancelled': 'cancelled',
+      'no-show': 'cancelled'
+    };
+    
+    const mappedStatus = statusMapping[status] || status;
+    
     const statusConfig = {
-      upcoming: { color: 'primary', icon: <Schedule sx={{ fontSize: 16 }} /> },
-      completed: { color: 'success', icon: <CheckCircle sx={{ fontSize: 16 }} /> },
-      cancelled: { color: 'error', icon: <Cancel sx={{ fontSize: 16 }} /> },
+      'upcoming': { color: 'primary', icon: <Schedule sx={{ fontSize: 16 }} /> },
+      'in-progress': { color: 'warning', icon: <AccessTime sx={{ fontSize: 16 }} /> },
+      'completed': { color: 'success', icon: <CheckCircle sx={{ fontSize: 16 }} /> },
+      'cancelled': { color: 'error', icon: <Cancel sx={{ fontSize: 16 }} /> },
     };
 
-    const config = statusConfig[status] || statusConfig.upcoming;
+    const config = statusConfig[mappedStatus] || statusConfig.upcoming;
 
     return (
       <Chip
         size="small"
         icon={config.icon}
-        label={status.charAt(0).toUpperCase() + status.slice(1)}
+        label={status.charAt(0).toUpperCase() + status.slice(1).replace('-', ' ')}
         color={config.color}
       />
     );
@@ -212,16 +227,16 @@ const Dashboard = () => {
         ))}
       </Grid>
 
-      {/* Tabs for different views */}
+      {/* Tabs for Different Views */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
         <Tabs value={selectedTab} onChange={(e, newValue) => setSelectedTab(newValue)}>
-          <Tab label="Today's Schedule" />
+          <Tab label="Today's Appointments" />
           <Tab label="Recent Patients" />
           <Tab label="Pending Tasks" />
         </Tabs>
       </Box>
 
-      {/* Today's Schedule */}
+      {/* Today's Appointments Table */}
       {selectedTab === 0 && (
         <TableContainer component={Paper}>
           <Table>
@@ -235,30 +250,50 @@ const Dashboard = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {todayAppointments.map((appointment) => (
-                <TableRow key={appointment.id}>
-                  <TableCell>{appointment.time}</TableCell>
-                  <TableCell>{appointment.patient}</TableCell>
-                  <TableCell>{appointment.type}</TableCell>
-                  <TableCell>{getStatusChip(appointment.status)}</TableCell>
-                  <TableCell>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      component={RouterLink}
-                      to={`/appointments/${appointment.id}`}
-                    >
-                      View Details
-                    </Button>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">
+                    <CircularProgress size={24} />
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : error ? (
+                <TableRow>
+                  <TableCell colSpan={5}>
+                    <Alert severity="error">{error}</Alert>
+                  </TableCell>
+                </TableRow>
+              ) : upcomingAppointments.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} align="center">No appointments scheduled for today</TableCell>
+                </TableRow>
+              ) : (
+                upcomingAppointments.map((appointment) => (
+                  <TableRow key={appointment._id}>
+                    <TableCell>{appointment.startTime}</TableCell>
+                    <TableCell>
+                      {`${appointment.patientUser?.firstName || ''} ${appointment.patientUser?.lastName || ''}`}
+                    </TableCell>
+                    <TableCell>{appointment.type}</TableCell>
+                    <TableCell>{getStatusChip(appointment.status)}</TableCell>
+                    <TableCell>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        component={RouterLink}
+                        to={`/appointments/${appointment._id}`}
+                      >
+                        View Details
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </TableContainer>
       )}
 
-      {/* Recent Patients */}
+      {/* Recent Patients Tab */}
       {selectedTab === 1 && (
         <TableContainer component={Paper}>
           <Table>
@@ -272,6 +307,7 @@ const Dashboard = () => {
               </TableRow>
             </TableHead>
             <TableBody>
+              {/* We can replace this with real data in the future */}
               {recentPatients.map((patient) => (
                 <TableRow key={patient.id}>
                   <TableCell>{patient.name}</TableCell>
@@ -295,7 +331,7 @@ const Dashboard = () => {
         </TableContainer>
       )}
 
-      {/* Pending Tasks */}
+      {/* Pending Tasks Tab */}
       {selectedTab === 2 && (
         <TableContainer component={Paper}>
           <Table>
@@ -309,6 +345,7 @@ const Dashboard = () => {
               </TableRow>
             </TableHead>
             <TableBody>
+              {/* We can replace this with real data in the future */}
               {pendingTasks.map((task) => (
                 <TableRow key={task.id}>
                   <TableCell>{task.type}</TableCell>
@@ -318,15 +355,17 @@ const Dashboard = () => {
                     <Chip
                       size="small"
                       label={task.priority}
-                      color={task.priority === 'high' ? 'error' : 'warning'}
+                      color={
+                        task.priority === 'high'
+                          ? 'error'
+                          : task.priority === 'medium'
+                          ? 'warning'
+                          : 'info'
+                      }
                     />
                   </TableCell>
                   <TableCell>
-                    <Button
-                      size="small"
-                      variant="contained"
-                      onClick={() => {}}
-                    >
+                    <Button size="small" variant="outlined">
                       Complete
                     </Button>
                   </TableCell>
@@ -428,43 +467,67 @@ const Dashboard = () => {
         Upcoming Appointments
       </Typography>
       <Card sx={{ mb: 4 }}>
-        <List>
-          {todayAppointments.map((appointment, index) => (
-            <React.Fragment key={appointment.id}>
-              <ListItem alignItems="flex-start">
-                <ListItemAvatar>
-                  <Avatar>
-                    <AccessTime />
-                  </Avatar>
-                </ListItemAvatar>
-                <ListItemText
-                  primary={
-                    <Typography variant="subtitle1">
-                      {appointment.type}
-                    </Typography>
-                  }
-                  secondary={
-                    <>
-                      <Typography component="span" variant="body2" color="text.primary">
-                        {appointment.time}
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+            <CircularProgress />
+          </Box>
+        ) : error ? (
+          <Box sx={{ p: 2 }}>
+            <Alert severity="error">{error}</Alert>
+          </Box>
+        ) : upcomingAppointments.length === 0 ? (
+          <Box sx={{ p: 3, textAlign: 'center' }}>
+            <Typography color="text.secondary">
+              No upcoming appointments scheduled
+            </Typography>
+            <Button
+              variant="contained"
+              component={RouterLink}
+              to="/appointments/schedule"
+              sx={{ mt: 2 }}
+            >
+              Book an Appointment
+            </Button>
+          </Box>
+        ) : (
+          <List>
+            {upcomingAppointments.map((appointment, index) => (
+              <React.Fragment key={appointment._id}>
+                <ListItem alignItems="flex-start">
+                  <ListItemAvatar>
+                    <Avatar>
+                      <AccessTime />
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={
+                      <Typography variant="subtitle1">
+                        {appointment.type}
                       </Typography>
-                      {` with Dr. ${appointment.doctor}`}
-                    </>
-                  }
-                />
-                <Button
-                  variant="outlined"
-                  size="small"
-                  component={RouterLink}
-                  to={`/appointments/${appointment.id}`}
-                >
-                  View Details
-                </Button>
-              </ListItem>
-              {index < todayAppointments.length - 1 && <Divider variant="inset" component="li" />}
-            </React.Fragment>
-          ))}
-        </List>
+                    }
+                    secondary={
+                      <>
+                        <Typography component="span" variant="body2" color="text.primary">
+                          {format(new Date(appointment.date), 'MMMM d, yyyy')} at {appointment.startTime}
+                        </Typography>
+                        {` with Dr. ${appointment.doctorUser?.firstName || ''} ${appointment.doctorUser?.lastName || ''}`}
+                      </>
+                    }
+                  />
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    component={RouterLink}
+                    to={`/appointments/${appointment._id}`}
+                  >
+                    View Details
+                  </Button>
+                </ListItem>
+                {index < upcomingAppointments.length - 1 && <Divider variant="inset" component="li" />}
+              </React.Fragment>
+            ))}
+          </List>
+        )}
       </Card>
     </>
   );
