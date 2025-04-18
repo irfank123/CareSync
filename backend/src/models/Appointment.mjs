@@ -1,4 +1,3 @@
-
 import mongoose from 'mongoose';
 
 const AppointmentSchema = new mongoose.Schema(
@@ -89,7 +88,20 @@ const AppointmentSchema = new mongoose.Schema(
     }]
   },
   {
-    timestamps: true
+    timestamps: true,
+    toJSON: { 
+      virtuals: true,
+      transform: function(doc, ret) {
+        // Convert ObjectId fields to strings for proper JSON serialization
+        if (ret._id) ret._id = ret._id.toString();
+        if (ret.patientId) ret.patientId = ret.patientId.toString();
+        if (ret.doctorId) ret.doctorId = ret.doctorId.toString();
+        if (ret.timeSlotId) ret.timeSlotId = ret.timeSlotId.toString();
+        if (ret.preliminaryAssessmentId) ret.preliminaryAssessmentId = ret.preliminaryAssessmentId.toString();
+        return ret;
+      }
+    },
+    toObject: { virtuals: true }
   }
 );
 

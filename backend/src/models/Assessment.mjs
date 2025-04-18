@@ -26,6 +26,7 @@ const AssessmentSchema = new mongoose.Schema(
     }],
     responses: [{
       questionId: String,
+      question: String,
       answer: mongoose.Schema.Types.Mixed
     }],
     aiGeneratedReport: {

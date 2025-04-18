@@ -7,6 +7,7 @@ import {
   createTimeSlot,
   updateTimeSlot,
   deleteTimeSlot,
+  getTimeSlotById,
   generateTimeSlots,
   importFromGoogle,
   exportToGoogle,
@@ -97,5 +98,17 @@ router.post(
   cacheMiddleware.clearCacheOnWrite('timeslots'),
   syncWithGoogle
 );
+
+// Get a specific timeslot by ID with formatted date
+router.get('/timeslot/:id', getTimeSlotById);
+
+// Add a simple test route to verify the router is working
+router.get('/test-route', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Availability router is working correctly',
+    timestamp: new Date()
+  });
+});
 
 export default router;

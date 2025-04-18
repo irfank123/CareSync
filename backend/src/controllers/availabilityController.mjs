@@ -248,6 +248,36 @@ export const deleteTimeSlot = asyncHandler(async (req, res, next) => {
 });
 
 /**
+ * @desc    Get a specific time slot by ID with formatted date
+ * @route   GET /api/availability/timeslot/:id
+ * @access  Private
+ */
+export const getTimeSlotById = asyncHandler(async (req, res, next) => {
+  const slotId = req.params.id;
+  
+  if (!slotId || !mongoose.Types.ObjectId.isValid(slotId)) {
+    return next(new AppError('Invalid time slot ID format', 400));
+  }
+  
+  try {
+    // Use the new service method that formats the date
+    const timeSlot = await availabilityService.getTimeSlotWithFormattedDate(slotId);
+    
+    if (!timeSlot) {
+      return next(new AppError('Time slot not found', 404));
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: timeSlot
+    });
+  } catch (error) {
+    console.error('Get time slot by ID error:', error);
+    return next(new AppError(`Failed to retrieve time slot: ${error.message}`, 500));
+  }
+});
+
+/**
  * @desc    Generate time slots from doctor's schedule
  * @route   POST /api/availability/doctor/:doctorId/generate
  * @access  Private (Admin, Doctor or Staff)
@@ -493,6 +523,7 @@ export default {
   createTimeSlot,
   updateTimeSlot,
   deleteTimeSlot,
+  getTimeSlotById,
   generateTimeSlots,
   importFromGoogle,
   exportToGoogle,

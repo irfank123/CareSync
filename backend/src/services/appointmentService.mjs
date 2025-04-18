@@ -254,8 +254,11 @@ class AppointmentService {
       const countResult = await Appointment.aggregate(countPipeline);
       const total = countResult.length > 0 ? countResult[0].total : 0;
       
+      // Serialize appointment ObjectIds to strings
+      const serializedAppointments = appointments.map(appointment => this._serializeObjectIds(appointment));
+      
       return {
-        appointments,
+        appointments: serializedAppointments,
         total,
         totalPages: Math.ceil(total / limit),
         currentPage: page
@@ -267,9 +270,81 @@ class AppointmentService {
   }
   
   /**
+   * Helper function to serialize MongoDB ObjectId to strings in a document
+   * This prevents [object Object] issues on the frontend
+   * @param {Object} doc - Document to serialize
+   * @returns {Object} Serialized document
+   */
+  _serializeObjectIds(doc) {
+    if (!doc) return doc;
+    
+    // For arrays, map over each item and serialize it
+    if (Array.isArray(doc)) {
+      return doc.map(item => this._serializeObjectIds(item));
+    }
+    
+    // If not an object, return as is
+    if (typeof doc !== 'object' || doc === null) {
+      return doc;
+    }
+    
+    // Clone the document to avoid mutation
+    const serialized = { ...doc };
+    
+    // Loop through all properties in the document
+    for (const [key, value] of Object.entries(serialized)) {
+      // Special handling for date fields
+      if (key === 'date' && value) {
+        // Format the date as YYYY-MM-DD string if it's a Date object
+        if (value instanceof Date || (value && value.constructor && value.constructor.name === 'Date')) {
+          const date = new Date(value);
+          if (!isNaN(date.getTime())) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            serialized[key] = `${year}-${month}-${day}`;
+          } else {
+            serialized[key] = ''; // Invalid date
+          }
+          continue;
+        }
+        // If date is already a string, leave it as is
+        else if (typeof value === 'string') {
+          continue;
+        }
+        // If date is an empty object, convert to empty string
+        else if (typeof value === 'object' && Object.keys(value).length === 0) {
+          serialized[key] = '';
+          continue;
+        }
+      }
+      
+      // Handle ObjectId directly
+      if (value && typeof value === 'object' && value.constructor && value.constructor.name === 'ObjectId') {
+        serialized[key] = value.toString();
+        continue;
+      }
+      
+      // Handle arrays of objects or ObjectIds
+      if (Array.isArray(value)) {
+        serialized[key] = value.map(item => this._serializeObjectIds(item));
+        continue;
+      }
+      
+      // Handle nested objects
+      if (value && typeof value === 'object' && value !== null) {
+        serialized[key] = this._serializeObjectIds(value);
+        continue;
+      }
+    }
+    
+    return serialized;
+  }
+
+  /**
    * Get appointment by ID
    * @param {string} appointmentId - Appointment ID
-   * @returns {Object} Appointment with related info
+   * @returns {Object} Appointment details
    */
   async getAppointmentById(appointmentId) {
     try {
@@ -397,7 +472,8 @@ class AppointmentService {
         return null;
       }
       
-      return appointment[0];
+      // Serialize ObjectIds to strings before returning to prevent [object Object] issues
+      return this._serializeObjectIds(appointment[0]);
     } catch (error) {
       console.error('Get appointment by ID error:', error);
       throw new Error(`Failed to retrieve appointment: ${error.message}`);
@@ -554,14 +630,57 @@ async createAppointment(appointmentData, userId) {
       throw new Error('Cannot create assessment without a valid appointmentId');
     }
     
+    console.log('Creating assessment with data:', appointmentData.assessment);
+    
+    // Format responses properly to include both question and answer
+    const formattedResponses = appointmentData.assessment.responses || [];
+    
+    // Store the questions directly if provided
+    const generatedQuestions = appointmentData.assessment.generatedQuestions || [];
+    
+    // Ensure each response includes the question field
+    const validResponses = formattedResponses.map(response => {
+      // If response already has both questionId and question, use as is
+      if (response.questionId && response.question) {
+        return response;
+      }
+      
+      // If response has questionId but no question field, try to find it
+      // This handles the case where frontend sends only questionId and answer
+      if (response.questionId && !response.question && response.answer) {
+        // Look for the question in the generatedQuestions array
+        const questionObj = generatedQuestions.find(q => q.questionId === response.questionId);
+        if (questionObj && questionObj.question) {
+          return {
+            questionId: response.questionId,
+            question: questionObj.question,
+            answer: response.answer
+          };
+        }
+        
+        // Fallback if question text not found
+        return {
+          questionId: response.questionId,
+          question: `Question ${response.questionId}`, // Fallback text
+          answer: response.answer
+        };
+      }
+      
+      return response;
+    }).filter(r => r.questionId && r.answer !== null && r.answer !== undefined);
+    
+    console.log('Formatted responses for assessment:', validResponses);
+    console.log('Generated questions for assessment:', generatedQuestions);
+    
     // Now we have the appointmentId, include it directly
     const assessment = await Assessment.create([{
       patientId: appointmentData.patientId,
       appointmentId: appointmentId, // Use the provided appointmentId
       symptoms: appointmentData.assessment.symptoms || [],
-      responses: appointmentData.assessment.responses || [],
+      generatedQuestions: generatedQuestions,
+      responses: validResponses,
       aiGeneratedReport: appointmentData.assessment.aiGeneratedReport,
-      severity: appointmentData.assessment.severity, // Already mapped in frontend
+      severity: appointmentData.assessment.severity || 'low', // Default to low if not provided
       status: 'completed',
       completionDate: new Date()
     }], { session });

@@ -92,6 +92,53 @@ class AvailabilityService {
   }
 
   /**
+   * Get a specific time slot by ID with formatted date string
+   * @param {string} slotId - Time slot ID
+   * @returns {Object} Time slot with formatted date
+   */
+  async getTimeSlotWithFormattedDate(slotId) {
+    try {
+      // Use lean() to get a plain JavaScript object instead of a Mongoose document
+      const timeSlot = await TimeSlot.findById(slotId).lean();
+      
+      if (!timeSlot) {
+        return null;
+      }
+      
+      // Explicitly convert the date to a string format
+      if (timeSlot.date) {
+        // Format the date as YYYY-MM-DD string
+        const date = new Date(timeSlot.date);
+        if (!isNaN(date.getTime())) {
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          timeSlot.date = `${year}-${month}-${day}`;
+        } else {
+          // If date is invalid, set to empty string instead of empty object
+          timeSlot.date = '';
+        }
+      } else {
+        // If date is missing, set to empty string instead of null/undefined
+        timeSlot.date = '';
+      }
+      
+      // Convert MongoDB ObjectIds to strings to ensure they serialize properly
+      if (timeSlot._id) {
+        timeSlot._id = timeSlot._id.toString();
+      }
+      if (timeSlot.doctorId) {
+        timeSlot.doctorId = timeSlot.doctorId.toString();
+      }
+      
+      return timeSlot;
+    } catch (error) {
+      console.error('Get time slot with formatted date error:', error);
+      throw new Error('Failed to retrieve time slot with formatted date');
+    }
+  }
+
+  /**
    * Create a new time slot for a doctor
    * @param {Object} slotData - Time slot data
    * @returns {Object} Created time slot

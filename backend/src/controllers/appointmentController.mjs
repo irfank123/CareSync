@@ -73,6 +73,44 @@ const getAppointments = async (req, res, next, { appointmentService }) => {
 };
 
 /**
+ * Helper function to format date fields in appointment objects
+ * @param {Object} appointment - Appointment object
+ * @returns {Object} Appointment with formatted date
+ */
+const formatAppointmentDate = (appointment) => {
+  if (!appointment) return appointment;
+  
+  // Create a copy of the appointment to avoid mutations
+  const formattedAppointment = { ...appointment };
+  
+  // Format appointment date
+  if (formattedAppointment.date) {
+    // If date is an object (MongoDB date), format it as YYYY-MM-DD string
+    if (typeof formattedAppointment.date === 'object') {
+      // Check if it's a Date object
+      if (formattedAppointment.date instanceof Date || 
+          (formattedAppointment.date.constructor && formattedAppointment.date.constructor.name === 'Date')) {
+        const date = new Date(formattedAppointment.date);
+        if (!isNaN(date.getTime())) {
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          formattedAppointment.date = `${year}-${month}-${day}`;
+        } else {
+          formattedAppointment.date = ''; // Invalid date
+        }
+      }
+      // If it's an empty object, set to empty string
+      else if (Object.keys(formattedAppointment.date).length === 0) {
+        formattedAppointment.date = '';
+      }
+    }
+  }
+  
+  return formattedAppointment;
+};
+
+/**
  * @desc    Get single appointment
  * @route   GET /api/appointments/:id
  * @access  Private (Admin, Doctor, Staff, or Involved Patient)
@@ -97,9 +135,12 @@ const getAppointment = async (req, res, next, { appointmentService }) => {
     return next(new AppError('You are not authorized to view this appointment', 403));
   }
   
+  // Format dates before sending response
+  const formattedAppointment = formatAppointmentDate(appointment);
+  
   res.status(200).json({
     success: true,
-    data: appointment
+    data: formattedAppointment
   });
 };
 
@@ -680,6 +721,67 @@ const checkAppointmentPermission = async (appointment, userId, userRole) => {
     return false;
   }
 };
+
+/**
+ * @desc    Get timeslot for an appointment
+ * @route   GET /api/appointments/timeslot/:id
+ * @access  Private
+ */
+export const getAppointmentTimeslot = asyncHandler(async (req, res, next) => {
+  const timeslotId = req.params.id;
+  
+  if (!timeslotId || !mongoose.Types.ObjectId.isValid(timeslotId)) {
+    return next(new AppError('Invalid timeslot ID format', 400));
+  }
+  
+  try {
+    // Import the availability service directly
+    const availabilityService = (await import('../services/availabilityService.mjs')).default;
+    
+    // Use the service to get the timeslot with formatted date
+    const timeslot = await availabilityService.getTimeSlotWithFormattedDate(timeslotId);
+    
+    if (!timeslot) {
+      return next(new AppError('Timeslot not found', 404));
+    }
+    
+    console.log('getAppointmentTimeslot: Retrieved timeslot:', JSON.stringify(timeslot));
+    
+    // Ensure date is properly formatted even if the service method didn't do it
+    if (timeslot.date && typeof timeslot.date === 'object') {
+      console.log('getAppointmentTimeslot: Date is still an object, formatting manually');
+      
+      // If it's a Date object
+      if (timeslot.date instanceof Date || 
+          (timeslot.date.constructor && timeslot.date.constructor.name === 'Date')) {
+        const date = new Date(timeslot.date);
+        if (!isNaN(date.getTime())) {
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          timeslot.date = `${year}-${month}-${day}`;
+        } else {
+          timeslot.date = ''; // Invalid date
+        }
+      }
+      // If it's an empty object, set to empty string
+      else if (Object.keys(timeslot.date).length === 0) {
+        timeslot.date = '';
+      }
+    }
+    
+    console.log('getAppointmentTimeslot: Sending response with formatted date:', 
+      timeslot.date, 'type:', typeof timeslot.date);
+    
+    res.status(200).json({
+      success: true,
+      data: timeslot
+    });
+  } catch (error) {
+    console.error('Get appointment timeslot error:', error);
+    return next(new AppError(`Failed to retrieve timeslot: ${error.message}`, 500));
+  }
+});
 
 // Define the dependencies for each controller method
 const dependencies = {

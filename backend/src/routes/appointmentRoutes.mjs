@@ -11,7 +11,8 @@ import {
   getDoctorAppointmentsWithDI,
   getUpcomingAppointmentsWithDI,
   createAppointmentValidation,
-  updateAppointmentValidation
+  updateAppointmentValidation,
+  getAppointmentTimeslot
 } from '../controllers/appointmentController.mjs';
 import authMiddleware from '../middleware/auth/authMiddleware.mjs';
 import { auditMiddleware, cacheMiddleware } from '../middleware/index.mjs';
@@ -259,5 +260,8 @@ router.route('/:id')
     cacheMiddleware.clearCacheOnWrite('appointments'),
     deleteAppointmentWithDI
   );
+
+// Add the route for getting a timeslot
+router.get('/timeslot/:id', getAppointmentTimeslot);
 
 export default router;
