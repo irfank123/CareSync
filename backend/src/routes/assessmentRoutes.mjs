@@ -51,6 +51,13 @@ router.get(
     assessmentController.getAssessmentByAppointment // Changed route slightly
 );
 
+// Check if an assessment exists for a specific appointment (without returning data)
+router.get(
+    '/exists/:appointmentId',
+    bypassAuth, // Replace with protect, restrictTo('patient', 'doctor', 'admin', 'staff') later
+    assessmentController.checkAssessmentExists
+);
+
 // Get all assessments for a specific patient (using query param)
 router.get(
     '/', // Changed route from /patients/:id/assessments

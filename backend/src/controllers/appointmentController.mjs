@@ -62,13 +62,18 @@ const getAppointments = async (req, res, next, { appointmentService }) => {
     clinicId
   });
   
+  // The service now formats the appointments, no need to map here
+  // const formattedAppointments = result.appointments.map(appointment => 
+  //   formatAppointmentForResponse(appointment)
+  // );
+  
   res.status(200).json({
     success: true,
-    count: result.appointments.length,
+    count: result.appointments.length, // Use length directly from service result
     total: result.total,
     totalPages: result.totalPages,
     currentPage: result.currentPage,
-    data: result.appointments
+    data: result.appointments // Use appointments directly from service result
   });
 };
 
@@ -116,7 +121,17 @@ const formatAppointmentDate = (appointment) => {
  * @access  Private (Admin, Doctor, Staff, or Involved Patient)
  */
 const getAppointment = async (req, res, next, { appointmentService }) => {
-  const appointmentId = req.params.id;
+  let appointmentId = req.params.id;
+  
+  // Handle special cases where the ID might be '[object Object]' or similar
+  if (appointmentId === '[object Object]' || appointmentId === '[object%20Object]') {
+    return next(new AppError('Invalid appointment ID format: Object received instead of string ID', 400));
+  }
+  
+  // Validate that the ID is a valid MongoDB ObjectId
+  if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
+    return next(new AppError(`Invalid appointment ID format: ${appointmentId}`, 400));
+  }
   
   const appointment = await appointmentService.getAppointmentById(appointmentId);
   
@@ -135,13 +150,105 @@ const getAppointment = async (req, res, next, { appointmentService }) => {
     return next(new AppError('You are not authorized to view this appointment', 403));
   }
   
-  // Format dates before sending response
-  const formattedAppointment = formatAppointmentDate(appointment);
+  // Format dates and ensure ObjectID fields are properly serialized
+  const formattedAppointment = formatAppointmentForResponse(appointment);
+  
+  // Log the final object being sent in the response
+  console.log('--- Final Appointment Data Sent to Frontend ---');
+  console.log(JSON.stringify(formattedAppointment, null, 2));
+  console.log('--- End Final Appointment Data ---');
   
   res.status(200).json({
     success: true,
     data: formattedAppointment
   });
+};
+
+/**
+ * Helper function to format appointment object for API response
+ * Ensures proper date formatting and ObjectID serialization
+ * @param {Object} appointment - Appointment object
+ * @returns {Object} Formatted appointment ready for API response
+ */
+const formatAppointmentForResponse = (appointment) => {
+  if (!appointment) return null;
+  
+  // Create a proper serializable object
+  let formattedAppointment;
+  
+  try {
+    // First convert to plain object if it's a Mongoose document
+    if (appointment.toObject && typeof appointment.toObject === 'function') {
+      formattedAppointment = appointment.toObject();
+    } else {
+      // If it's already a plain object, create a fresh copy
+      formattedAppointment = JSON.parse(JSON.stringify(appointment));
+    }
+    
+    // Ensure _id is properly serialized as string
+    if (formattedAppointment._id) {
+      if (typeof formattedAppointment._id === 'object' && formattedAppointment._id !== null) {
+        formattedAppointment._id = formattedAppointment._id.toString();
+      }
+    }
+    
+    // Ensure other ObjectID fields are serialized
+    const objectIdFields = ['patientId', 'doctorId', 'timeSlotId', 'preliminaryAssessmentId'];
+    objectIdFields.forEach(field => {
+      if (formattedAppointment[field]) {
+        if (typeof formattedAppointment[field] === 'object' && formattedAppointment[field] !== null) {
+          formattedAppointment[field] = formattedAppointment[field].toString();
+        }
+      }
+    });
+    
+    // Format date field
+    if (formattedAppointment.date) {
+      // If date is an object (MongoDB date), format it as YYYY-MM-DD string
+      if (typeof formattedAppointment.date === 'object') {
+        // Check if it's a Date object
+        if (formattedAppointment.date instanceof Date || 
+            (formattedAppointment.date.constructor && formattedAppointment.date.constructor.name === 'Date')) {
+          const date = new Date(formattedAppointment.date);
+          if (!isNaN(date.getTime())) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            formattedAppointment.date = `${year}-${month}-${day}`;
+          } else {
+            formattedAppointment.date = ''; // Invalid date
+          }
+        }
+        // If it's an empty object, set to empty string
+        else if (Object.keys(formattedAppointment.date).length === 0) {
+          formattedAppointment.date = '';
+        }
+      }
+    }
+    
+    // Ensure nested objects also have their IDs serialized
+    if (formattedAppointment.patient && formattedAppointment.patient._id) {
+      formattedAppointment.patient._id = formattedAppointment.patient._id.toString();
+    }
+    
+    if (formattedAppointment.doctor && formattedAppointment.doctor._id) {
+      formattedAppointment.doctor._id = formattedAppointment.doctor._id.toString();
+    }
+    
+    if (formattedAppointment.patientUser && formattedAppointment.patientUser._id) {
+      formattedAppointment.patientUser._id = formattedAppointment.patientUser._id.toString();
+    }
+    
+    if (formattedAppointment.doctorUser && formattedAppointment.doctorUser._id) {
+      formattedAppointment.doctorUser._id = formattedAppointment.doctorUser._id.toString();
+    }
+    
+    return formattedAppointment;
+  } catch (error) {
+    console.error('Error formatting appointment response:', error);
+    // Return original appointment as fallback
+    return appointment;
+  }
 };
 
 /**
@@ -369,6 +476,11 @@ const getPatientAppointments = async (req, res, next, { appointmentService, pati
     endDate
   });
   
+  // Service handles formatting
+  // const formattedAppointments = result.appointments.map(appointment => 
+  //   formatAppointmentForResponse(appointment)
+  // );
+  
   res.status(200).json({
     success: true,
     count: result.appointments.length,
@@ -450,13 +562,18 @@ const getDoctorAppointments = async (req, res, next, { appointmentService, docto
     
     console.log(`Found ${result.appointments?.length || 0} appointments for doctor ${doctorId}`);
     
+    // Service handles formatting
+    // const formattedAppointments = (result.appointments || []).map(appointment => 
+    //   formatAppointmentForResponse(appointment)
+    // );
+    
     res.status(200).json({
       success: true,
-      count: result.appointments?.length || 0,
+      count: result.appointments?.length || 0, // Use length directly
       total: result.total || 0,
       totalPages: result.totalPages || 1,
       currentPage: result.currentPage || 1,
-      data: result.appointments || []
+      data: result.appointments || [] // Use data directly
     });
   } catch (err) {
     console.error('Error fetching doctor appointments:', err);
@@ -480,178 +597,63 @@ const getUpcomingAppointments = async (req, res, next, { appointmentService, pat
       role: req.userRole
     });
     
-    // Simple approach: Query all appointments for this user based on role
-    const { Appointment, Patient, Doctor, User } = await import('../models/index.mjs');
-    
     let appointments = [];
     
-    // Find the user's patient/doctor ID
+    // Find the appointments based on user role
     if (req.userRole === 'patient') {
-      // Get the patient record for this user
-      const patient = await Patient.findOne({ userId: req.user._id });
-      
-      if (!patient) {
+      const patientRecord = await patientService.getByUserId(req.user._id);
+      if (!patientRecord) {
         return res.status(404).json({
           success: false,
-          message: 'Patient record not found for this user'
+          message: 'Patient record not found'
         });
       }
       
-      console.log(`Found patient with ID ${patient._id} for user ${req.user._id}`);
-      
-      // Get all appointments in database (we can filter later)
-      appointments = await Appointment.find({}).lean();
-      console.log(`Total appointments in database: ${appointments.length}`);
-      
-      // Convert to string for comparison
-      const patientIdStr = patient._id.toString();
-      
-      // Filter the appointments client-side to find all that have this patient
-      appointments = appointments.filter(appt => {
-        const hasPatientField = appt.patient && (
-          (typeof appt.patient === 'string' && appt.patient === patientIdStr) ||
-          (appt.patient._id && appt.patient._id.toString() === patientIdStr)
-        );
-        
-        const hasPatientIdField = appt.patientId && (
-          (typeof appt.patientId === 'string' && appt.patientId === patientIdStr) ||
-          (appt.patientId._id && appt.patientId._id.toString() === patientIdStr)
-        );
-        
-        return hasPatientField || hasPatientIdField;
+      const result = await appointmentService.getAllAppointments({
+        patientId: patientRecord._id.toString(),
+        status: 'scheduled', // Filter for upcoming
+        sort: 'date',
+        order: 'asc',
+        limit: 10 // Limit results if desired
       });
       
-      console.log(`Found ${appointments.length} appointments for patient ${patientIdStr}`);
-        
-    } else if (req.userRole === 'doctor') {
-      // Get the doctor record for this user
-      const doctor = await Doctor.findOne({ userId: req.user._id });
-      
-      if (!doctor) {
+      appointments = result.appointments || [];
+    } 
+    else if (req.userRole === 'doctor') {
+      const doctorRecord = await doctorService.getByUserId(req.user._id);
+      if (!doctorRecord) {
         return res.status(404).json({
           success: false,
-          message: 'Doctor record not found for this user'
+          message: 'Doctor record not found'
         });
       }
       
-      console.log(`Found doctor with ID ${doctor._id} for user ${req.user._id}`);
-      
-      // Get all appointments in database (we can filter later)
-      appointments = await Appointment.find({}).lean();
-      
-      // Convert to string for comparison
-      const doctorIdStr = doctor._id.toString();
-      
-      // Filter the appointments client-side to find all that have this doctor
-      appointments = appointments.filter(appt => {
-        const hasDoctorField = appt.doctor && (
-          (typeof appt.doctor === 'string' && appt.doctor === doctorIdStr) ||
-          (appt.doctor._id && appt.doctor._id.toString() === doctorIdStr)
-        );
-        
-        const hasDoctorIdField = appt.doctorId && (
-          (typeof appt.doctorId === 'string' && appt.doctorId === doctorIdStr) ||
-          (appt.doctorId._id && appt.doctorId._id.toString() === doctorIdStr)
-        );
-        
-        return hasDoctorField || hasDoctorIdField;
+      const result = await appointmentService.getAllAppointments({
+        doctorId: doctorRecord._id.toString(),
+        status: 'scheduled', // Filter for upcoming
+        sort: 'date',
+        order: 'asc',
+        limit: 10 // Limit results if desired
       });
       
-      console.log(`Found ${appointments.length} appointments for doctor ${doctorIdStr}`);
-        
-    } else if (req.userRole === 'admin' || req.userRole === 'staff') {
-      // For admin and staff, return all appointments
-      appointments = await Appointment.find({}).lean();
+      appointments = result.appointments || [];
     }
     
-    // Now process each appointment to add doctor name if needed
-    if (appointments.length > 0) {
-      console.log('Found appointments, retrieving doctor information');
-      
-      // Get all doctor IDs
-      const doctorIds = appointments.map(appointment => {
-        if (appointment.doctor) {
-          return typeof appointment.doctor === 'string' 
-            ? appointment.doctor 
-            : appointment.doctor._id?.toString();
-        } else if (appointment.doctorId) {
-          return typeof appointment.doctorId === 'string'
-            ? appointment.doctorId
-            : appointment.doctorId._id?.toString();
-        }
-        return null;
-      }).filter(id => id !== null);
-      
-      console.log(`Found ${doctorIds.length} unique doctor IDs to look up`);
-      
-      // Fetch all doctors in one query
-      const doctors = await Doctor.find({
-        _id: { $in: doctorIds }
-      }).lean();
-      
-      console.log(`Retrieved ${doctors.length} doctors from database`);
-      
-      // Get all user IDs from doctors
-      const userIds = doctors.map(doc => doc.userId?.toString()).filter(id => id);
-      
-      // Fetch all users in one query
-      const users = await User.find({
-        _id: { $in: userIds }
-      }).lean();
-      
-      console.log(`Retrieved ${users.length} doctor users from database`);
-      
-      // Create lookup maps for fast access
-      const doctorMap = {};
-      doctors.forEach(doc => {
-        doctorMap[doc._id.toString()] = doc;
-      });
-      
-      const userMap = {};
-      users.forEach(user => {
-        userMap[user._id.toString()] = user;
-      });
-      
-      // Now add doctor info to each appointment
-      for (const appointment of appointments) {
-        let doctorId = null;
-        
-        // Find the doctor ID
-        if (appointment.doctor) {
-          doctorId = typeof appointment.doctor === 'string' 
-            ? appointment.doctor 
-            : appointment.doctor._id?.toString();
-        } else if (appointment.doctorId) {
-          doctorId = typeof appointment.doctorId === 'string'
-            ? appointment.doctorId
-            : appointment.doctorId._id?.toString();
-        }
-        
-        if (doctorId) {
-          const doctor = doctorMap[doctorId];
-          if (doctor && doctor.userId) {
-            const user = userMap[doctor.userId.toString()];
-            if (user) {
-              appointment.doctorName = `Dr. ${user.firstName} ${user.lastName}`;
-              appointment.doctorSpecialty = doctor.specialization || 'General Practitioner';
-              console.log(`Added doctor name: ${appointment.doctorName} for appointment ${appointment._id}`);
-            }
-          }
-        }
-      }
-    }
+    // The service already handles formatting, including populated user data
+    // const formattedAppointments = appointments.map(appointment => 
+    //   formatAppointmentForResponse(appointment)
+    // );
     
-    // Return the appointments
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      count: appointments.length,
-      data: appointments
+      count: appointments.length, // Use length from service result
+      data: appointments // Use data directly from service result
     });
   } catch (err) {
-    console.error('Error fetching appointments:', err);
-    res.status(500).json({
+    console.error('Error fetching upcoming appointments:', err);
+    return res.status(500).json({
       success: false,
-      message: 'Failed to retrieve appointments',
+      message: 'Failed to retrieve upcoming appointments',
       error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
@@ -691,33 +693,55 @@ const getDoctorForUser = async (userId) => {
 
 /**
  * Helper function to check if a user has permission to access an appointment
- * @param {Object} appointment - Appointment object
- * @param {string} userId - User ID
- * @param {string} userRole - User role
+ * @param {Object} appointment - Appointment object (potentially with ObjectIds)
+ * @param {string} userId - User ID of the person requesting access
+ * @param {string} userRole - User role of the person requesting access
  * @returns {boolean} Has permission
  */
 const checkAppointmentPermission = async (appointment, userId, userRole) => {
   try {
+    console.log('--- checkAppointmentPermission Start ---');
+    console.log('Requested by userId:', userId, 'Role:', userRole);
+    console.log('Appointment Data (raw):', JSON.stringify(appointment, null, 2));
+    
     // Admins and staff have access to all appointments
     if (userRole === 'admin' || userRole === 'staff') {
+      console.log('Permission granted: User is admin or staff.');
       return true;
     }
+    
+    // Ensure appointment IDs are strings for comparison
+    const appointmentDoctorIdStr = appointment.doctorId?.toString();
+    const appointmentPatientIdStr = appointment.patientId?.toString();
+    console.log('Comparing against Appt Doctor ID:', appointmentDoctorIdStr);
+    console.log('Comparing against Appt Patient ID:', appointmentPatientIdStr);
     
     // For doctors, check if they are the assigned doctor
     if (userRole === 'doctor') {
       const doctorRecord = await getDoctorForUser(userId);
-      return doctorRecord && doctorRecord._id.toString() === appointment.doctorId.toString();
+      console.log('Doctor Record Found:', JSON.stringify(doctorRecord, null, 2));
+      const hasAccess = doctorRecord && doctorRecord._id.toString() === appointmentDoctorIdStr;
+      console.log('Doctor Permission Check Result:', hasAccess);
+      console.log('--- checkAppointmentPermission End ---');
+      return hasAccess;
     }
     
     // For patients, check if they are the patient for this appointment
     if (userRole === 'patient') {
       const patientRecord = await getPatientForUser(userId);
-      return patientRecord && patientRecord._id.toString() === appointment.patientId.toString();
+      console.log('Patient Record Found:', JSON.stringify(patientRecord, null, 2));
+      const hasAccess = patientRecord && patientRecord._id.toString() === appointmentPatientIdStr;
+      console.log('Patient Permission Check Result:', hasAccess);
+      console.log('--- checkAppointmentPermission End ---');
+      return hasAccess;
     }
     
+    console.log('Permission denied: Role not recognized or no match found.');
+    console.log('--- checkAppointmentPermission End ---');
     return false;
   } catch (error) {
     console.error('Error checking appointment permission:', error);
+    console.log('--- checkAppointmentPermission End (Error) ---');
     return false;
   }
 };
@@ -783,6 +807,76 @@ export const getAppointmentTimeslot = asyncHandler(async (req, res, next) => {
   }
 });
 
+/**
+ * @desc    Get appointments for the currently logged-in user (patient or doctor)
+ * @route   GET /api/appointments/me
+ * @access  Private (Patient, Doctor)
+ */
+const getMyAppointments = async (req, res, next, { patientService, doctorService, appointmentService }) => {
+  try {
+    console.log('GET my appointments request:', {
+      userId: req.user._id,
+      role: req.userRole
+    });
+    
+    let participantId = null;
+    
+    // Determine the participant ID based on role
+    if (req.userRole === 'patient') {
+      const patientRecord = await patientService.getByUserId(req.user._id);
+      if (!patientRecord) {
+        return res.status(404).json({
+          success: false,
+          message: 'Patient profile not found for this user'
+        });
+      }
+      participantId = patientRecord._id.toString();
+    } else if (req.userRole === 'doctor') {
+      const doctorRecord = await doctorService.getByUserId(req.user._id);
+      if (!doctorRecord) {
+        return res.status(404).json({
+          success: false,
+          message: 'Doctor profile not found for this user'
+        });
+      }
+      participantId = doctorRecord._id.toString();
+    }
+    
+    if (!participantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Could not determine participant ID for user role'
+      });
+    }
+    
+    // Use the existing service method to fetch and format appointments
+    const options = {
+      [req.userRole === 'patient' ? 'patientId' : 'doctorId']: participantId,
+      page: req.query.page || 1,
+      limit: req.query.limit || 100, // Fetch more by default for 'my' list?
+      sort: req.query.sort || 'date',
+      order: req.query.order || 'desc'
+    };
+    
+    console.log(`Using appointmentService.getAllAppointments with options:`, options);
+    const result = await appointmentService.getAllAppointments(options);
+    
+    // The service already formats the data, including ObjectIDs
+    res.status(200).json({
+      success: true,
+      count: result.appointments.length,
+      total: result.total,
+      totalPages: result.totalPages,
+      currentPage: result.currentPage,
+      data: result.appointments
+    });
+  } catch (err) {
+    console.error('Error fetching my appointments:', err);
+    // Use next(err) for centralized error handling
+    next(new AppError('Error fetching appointments', 500, err)); 
+  }
+};
+
 // Define the dependencies for each controller method
 const dependencies = {
   getAppointments: ['appointmentService'],
@@ -792,7 +886,8 @@ const dependencies = {
   deleteAppointment: ['appointmentService'],
   getPatientAppointments: ['appointmentService', 'patientService'],
   getDoctorAppointments: ['appointmentService', 'doctorService'],
-  getUpcomingAppointments: ['appointmentService', 'patientService', 'doctorService']
+  getUpcomingAppointments: ['appointmentService', 'patientService', 'doctorService'],
+  getMyAppointments: ['patientService', 'doctorService', 'appointmentService']
 };
 
 // Create the controller object with all methods
@@ -804,7 +899,8 @@ const appointmentController = {
   deleteAppointment,
   getPatientAppointments,
   getDoctorAppointments,
-  getUpcomingAppointments
+  getUpcomingAppointments,
+  getMyAppointments
 };
 
 // Apply DI to the controller
@@ -848,7 +944,8 @@ export const {
   deleteAppointment: deleteAppointmentWithDI,
   getPatientAppointments: getPatientAppointmentsWithDI,
   getDoctorAppointments: getDoctorAppointmentsWithDI,
-  getUpcomingAppointments: getUpcomingAppointmentsWithDI
+  getUpcomingAppointments: getUpcomingAppointmentsWithDI,
+  getMyAppointments: getMyAppointmentsWithDI
 } = enhancedController;
 
 // Export the validation middleware
@@ -867,6 +964,8 @@ export default {
   getPatientAppointments: getPatientAppointmentsWithDI,
   getDoctorAppointments: getDoctorAppointmentsWithDI,
   getUpcomingAppointments: getUpcomingAppointmentsWithDI,
+  getMyAppointments: getMyAppointmentsWithDI,
+  getAppointmentTimeslot,
   createAppointmentValidation,
   updateAppointmentValidation
 };

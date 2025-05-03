@@ -76,7 +76,13 @@ class AppointmentService {
       
       // Filter by patient if provided
       if (patientId) {
-        matchConditions.patientId = mongoose.Types.ObjectId(patientId);
+        // Ensure patientId is valid before creating ObjectId
+        if (mongoose.Types.ObjectId.isValid(patientId)) {
+          matchConditions.patientId = new mongoose.Types.ObjectId(patientId);
+        } else {
+          console.error('Invalid patientId format in service:', patientId);
+          throw new Error('Invalid patient ID format');
+        }
       }
       
       // Filter by date range
@@ -209,274 +215,214 @@ class AppointmentService {
       pipeline.push({ $limit: limit });
       
       // Stage 11: Project the fields we want to return
+      // Simplify projection: Keep all fields from previous stages, add virtual 'id'
       pipeline.push({
-        $project: {
-          _id: 1,
-          patientId: 1,
-          doctorId: 1,
-          timeSlotId: 1,
-          date: 1,
-          startTime: 1,
-          endTime: 1,
-          type: 1,
-          status: 1,
-          notes: 1,
-          reasonForVisit: 1,
-          preliminaryAssessmentId: 1,
-          isVirtual: 1,
-          videoConferenceLink: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          cancelledAt: 1,
-          cancelReason: 1,
-          remindersSent: 1,
-          'patient._id': 1,
-          'patient.userId': 1,
-          'doctor._id': 1,
-          'doctor.userId': 1,
-          'patientUser._id': 1,
-          'patientUser.firstName': 1,
-          'patientUser.lastName': 1,
-          'patientUser.email': 1,
-          'patientUser.phoneNumber': 1,
-          'doctorUser._id': 1,
-          'doctorUser.firstName': 1,
-          'doctorUser.lastName': 1,
-          'doctorUser.email': 1,
-          'doctorUser.phoneNumber': 1
+        $addFields: {
+          id: "$_id" 
         }
       });
       
       // Execute the aggregation pipeline
-      const appointments = await Appointment.aggregate(pipeline);
+      const [appointments, totalResult] = await Promise.all([
+        Appointment.aggregate(pipeline).exec(),
+        Appointment.aggregate(countPipeline).exec()
+      ]);
       
-      // Get the total count for pagination
-      const countResult = await Appointment.aggregate(countPipeline);
-      const total = countResult.length > 0 ? countResult[0].total : 0;
+      // Log raw aggregation results for the first appointment (if any)
+      if (appointments && appointments.length > 0) {
+          console.log('--- Raw Aggregation Result (getAllAppointments) ---');
+          console.log(JSON.stringify(appointments[0], null, 2));
+          console.log('--- End Raw Aggregation Result ---');
+      }
       
-      // Serialize appointment ObjectIds to strings
-      const serializedAppointments = appointments.map(appointment => this._serializeObjectIds(appointment));
+      // Manually format each appointment after aggregation
+      const formattedAppointments = appointments.map(appointment => {
+        return this.formatAppointmentForResponse(appointment);
+      });
+      
+      // Log formatted results for the first appointment (if any)
+      if (formattedAppointments && formattedAppointments.length > 0) {
+          console.log('--- Formatted Result (getAllAppointments) ---');
+          console.log(JSON.stringify(formattedAppointments[0], null, 2));
+          console.log('--- End Formatted Result ---');
+      }
+      
+      const total = totalResult[0]?.total || 0;
+      const totalPages = Math.ceil(total / limit);
       
       return {
-        appointments: serializedAppointments,
+        appointments: formattedAppointments,
         total,
-        totalPages: Math.ceil(total / limit),
+        totalPages,
         currentPage: page
       };
     } catch (error) {
-      console.error('Get all appointments error:', error);
-      throw new Error('Failed to retrieve appointments');
+      console.error('Error in getAllAppointments service:', error);
+      throw new Error('Failed to retrieve appointments: ' + error.message);
     }
   }
   
   /**
-   * Helper function to serialize MongoDB ObjectId to strings in a document
-   * This prevents [object Object] issues on the frontend
-   * @param {Object} doc - Document to serialize
-   * @returns {Object} Serialized document
+   * Helper function within the service to format appointment object
+   * (Similar to the one in the controller, ensuring consistency)
    */
-  _serializeObjectIds(doc) {
-    if (!doc) return doc;
-    
-    // For arrays, map over each item and serialize it
-    if (Array.isArray(doc)) {
-      return doc.map(item => this._serializeObjectIds(item));
-    }
-    
-    // If not an object, return as is
-    if (typeof doc !== 'object' || doc === null) {
-      return doc;
-    }
-    
-    // Clone the document to avoid mutation
-    const serialized = { ...doc };
-    
-    // Loop through all properties in the document
-    for (const [key, value] of Object.entries(serialized)) {
-      // Special handling for date fields
-      if (key === 'date' && value) {
-        // Format the date as YYYY-MM-DD string if it's a Date object
-        if (value instanceof Date || (value && value.constructor && value.constructor.name === 'Date')) {
-          const date = new Date(value);
-          if (!isNaN(date.getTime())) {
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const day = String(date.getDate()).padStart(2, '0');
-            serialized[key] = `${year}-${month}-${day}`;
-          } else {
-            serialized[key] = ''; // Invalid date
-          }
-          continue;
-        }
-        // If date is already a string, leave it as is
-        else if (typeof value === 'string') {
-          continue;
-        }
-        // If date is an empty object, convert to empty string
-        else if (typeof value === 'object' && Object.keys(value).length === 0) {
-          serialized[key] = '';
-          continue;
-        }
-      }
+  formatAppointmentForResponse(appointment) {
+    if (!appointment) return null;
+
+    try {
+      // Manually construct the response object
+      const formattedAppointment = {
+        _id: appointment._id?.toString(),
+        // Keep original IDs as ObjectIds if they exist, otherwise use strings
+        patientId: appointment.patientId?._id ?? appointment.patientId,
+        doctorId: appointment.doctorId?._id ?? appointment.doctorId,
+        timeSlotId: appointment.timeSlotId?.toString(),
+        date: null, // Initialize date, will format below
+        startTime: appointment.startTime,
+        endTime: appointment.endTime,
+        type: appointment.type,
+        status: appointment.status,
+        notes: appointment.notes,
+        reasonForVisit: appointment.reasonForVisit,
+        preliminaryAssessmentId: appointment.preliminaryAssessmentId?.toString(),
+        isVirtual: appointment.isVirtual,
+        videoConferenceLink: appointment.videoConferenceLink,
+        createdAt: appointment.createdAt?.toISOString(),
+        updatedAt: appointment.updatedAt?.toISOString(),
+        cancelledAt: appointment.cancelledAt?.toISOString(),
+        cancelReason: appointment.cancelReason,
+        remindersSent: appointment.remindersSent, // Assuming this is already ok
+        
+        // --- MODIFIED: Handle both populated and aggregated user data --- 
+        // Determine the source of user data (aggregation vs population)
+        patient: appointment.patient || appointment.patientId || null,
+        doctor: appointment.doctor || appointment.doctorId || null,
+        patientUser: appointment.patientUser || appointment.patientId?.userId || null, 
+        doctorUser: appointment.doctorUser || appointment.doctorId?.userId || null,
+        // --- END MODIFICATION ---
+
+        // Use the 'id' field added in the aggregation pipeline
+        id: appointment.id?.toString() || appointment._id?.toString()
+      };
       
-      // Handle ObjectId directly
-      if (value && typeof value === 'object' && value.constructor && value.constructor.name === 'ObjectId') {
-        serialized[key] = value.toString();
-        continue;
+      // Format date
+      // Use optional chaining for safety
+      const dateObj = appointment.date;
+      if (dateObj instanceof Date && !isNaN(dateObj?.getTime())) {
+         const year = dateObj.getFullYear();
+         const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+         const day = String(dateObj.getDate()).padStart(2, '0');
+         formattedAppointment.date = `${year}-${month}-${day}`;
+      } else if (typeof dateObj === 'string') { 
+         // Handle case where date might already be a string 'YYYY-MM-DD'
+         formattedAppointment.date = dateObj;
       }
+
+      // Clean up the nested objects (optional, but good practice)
+      // Remove potentially sensitive or unnecessary fields before sending
+      const safeUserProjection = (user) => {
+        if (!user) return null;
+        return {
+          _id: user._id?.toString(),
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email, // Consider if email/phone are needed in lists
+          phoneNumber: user.phoneNumber 
+        };
+      };
       
-      // Handle arrays of objects or ObjectIds
-      if (Array.isArray(value)) {
-        serialized[key] = value.map(item => this._serializeObjectIds(item));
-        continue;
-      }
-      
-      // Handle nested objects
-      if (value && typeof value === 'object' && value !== null) {
-        serialized[key] = this._serializeObjectIds(value);
-        continue;
-      }
+      formattedAppointment.patientUser = safeUserProjection(formattedAppointment.patientUser);
+      formattedAppointment.doctorUser = safeUserProjection(formattedAppointment.doctorUser);
+
+      // Simplify patient/doctor objects if needed
+      const safeProfileProjection = (profile) => {
+          if (!profile) return null;
+          // Ensure we use the correct userId source
+          const userId = profile.userId?._id?.toString() || profile.userId?.toString() || profile._id?.toString(); 
+          return {
+              _id: profile._id?.toString(),
+              userId: userId
+              // Add other necessary fields from Patient/Doctor models if needed
+          };
+      };
+      // Pass the correct source object to the projection
+      formattedAppointment.patient = safeProfileProjection(appointment.patient || appointment.patientId);
+      formattedAppointment.doctor = safeProfileProjection(appointment.doctor || appointment.doctorId);
+
+      return formattedAppointment;
+    } catch (error) {
+      console.error('Error formatting appointment in service:', error);
+      // Attempt to return a minimally formatted object on error
+      return {
+         _id: appointment?._id?.toString(),
+         error: "Failed to format appointment data fully"
+      };
     }
-    
-    return serialized;
   }
 
   /**
-   * Get appointment by ID
-   * @param {string} appointmentId - Appointment ID
-   * @returns {Object} Appointment details
+   * @desc    Get single appointment by ID
+   * @param {string} id - Appointment ID
+   * @returns {Object} Appointment or null
    */
-  async getAppointmentById(appointmentId) {
+  async getAppointmentById(id) {
     try {
-      // Validate ObjectId
-      if (!mongoose.Types.ObjectId.isValid(appointmentId)) {
-        throw new Error('Invalid appointment ID format');
-      }
-      
-      // Use aggregation to get appointment with related data
-      const appointment = await Appointment.aggregate([
-        {
-          $match: { _id: new mongoose.Types.ObjectId(appointmentId) }
-        },
-        {
-          $lookup: {
-            from: 'patients',
-            localField: 'patientId',
-            foreignField: '_id',
-            as: 'patient'
-          }
-        },
-        {
-          $lookup: {
-            from: 'doctors',
-            localField: 'doctorId',
-            foreignField: '_id',
-            as: 'doctor'
-          }
-        },
-        {
-          $unwind: {
-            path: '$patient',
-            preserveNullAndEmptyArrays: true
-          }
-        },
-        {
-          $unwind: {
-            path: '$doctor',
-            preserveNullAndEmptyArrays: true
-          }
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'patient.userId',
-            foreignField: '_id',
-            as: 'patientUser'
-          }
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'doctor.userId',
-            foreignField: '_id',
-            as: 'doctorUser'
-          }
-        },
-        {
-          $unwind: {
-            path: '$patientUser',
-            preserveNullAndEmptyArrays: true
-          }
-        },
-        {
-          $unwind: {
-            path: '$doctorUser',
-            preserveNullAndEmptyArrays: true
-          }
-        },
-        {
-          $lookup: {
-            from: 'assessments',
-            localField: 'preliminaryAssessmentId',
-            foreignField: '_id',
-            as: 'assessment'
-          }
-        },
-        {
-          $project: {
-            _id: 1,
-            patientId: 1,
-            doctorId: 1,
-            timeSlotId: 1,
-            date: 1,
-            startTime: 1,
-            endTime: 1,
-            type: 1,
-            status: 1,
-            notes: 1,
-            reasonForVisit: 1,
-            preliminaryAssessmentId: 1,
-            isVirtual: 1,
-            videoConferenceLink: 1,
-            createdAt: 1,
-            updatedAt: 1,
-            cancelledAt: 1,
-            cancelReason: 1,
-            remindersSent: 1,
-            'patient._id': 1,
-            'patient.userId': 1,
-            'patient.dateOfBirth': 1,
-            'patient.gender': 1,
-            'patient.allergies': 1,
-            'patient.currentMedications': 1,
-            'doctor._id': 1,
-            'doctor.userId': 1,
-            'doctor.specialties': 1,
-            'doctor.licenseNumber': 1,
-            'patientUser._id': 1,
-            'patientUser.firstName': 1,
-            'patientUser.lastName': 1,
-            'patientUser.email': 1,
-            'patientUser.phoneNumber': 1,
-            'doctorUser._id': 1,
-            'doctorUser.firstName': 1,
-            'doctorUser.lastName': 1,
-            'doctorUser.email': 1,
-            'doctorUser.phoneNumber': 1,
-            'assessment': 1
-          }
-        }
-      ]);
-      
-      if (!appointment || appointment.length === 0) {
+      // Validate the ID first
+      if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        console.error('Invalid appointment ID passed to getAppointmentById:', id);
         return null;
       }
       
-      // Serialize ObjectIds to strings before returning to prevent [object Object] issues
-      return this._serializeObjectIds(appointment[0]);
+      // Step 1: Fetch the core Appointment document
+      let appointment = await Appointment.findById(id).exec();
+        
+      if (!appointment) {
+        return null;
+      }
+      
+      // Step 2: Explicitly populate the necessary fields on the Mongoose document
+      // Check if fields are already populated before trying again
+      if (!appointment.populated('patientId')) {
+          await appointment.populate({
+            path: 'patientId',
+            model: 'Patient',
+            populate: {
+              path: 'userId',
+              model: 'User',
+              select: 'firstName lastName email phoneNumber'
+            }
+          });
+      }
+      if (!appointment.populated('doctorId')) {
+          await appointment.populate({
+            path: 'doctorId',
+            model: 'Doctor',
+            populate: {
+              path: 'userId',
+              model: 'User',
+              select: 'firstName lastName email phoneNumber'
+            }
+          });
+      }
+      
+      // --- BEGIN DEBUG LOGGING ---
+      console.log(`--- Populated Appointment Data (getAppointmentById: ${id}) ---`);
+      // Convert Mongoose doc to plain object for reliable logging
+      const appointmentObj = appointment ? appointment.toObject() : null;
+      console.log('Appointment Object:', JSON.stringify(appointmentObj, null, 2));
+      // Explicitly check populated fields
+      console.log('Populated patientId:', JSON.stringify(appointmentObj?.patientId, null, 2));
+      console.log('Populated patientId.userId:', JSON.stringify(appointmentObj?.patientId?.userId, null, 2));
+      console.log('Populated doctorId:', JSON.stringify(appointmentObj?.doctorId, null, 2));
+      console.log('Populated doctorId.userId:', JSON.stringify(appointmentObj?.doctorId?.userId, null, 2));
+      console.log('--- End Populated Appointment Data ---');
+      // --- END DEBUG LOGGING ---
+      
+      // Step 3: Format the fully populated Mongoose document
+      return this.formatAppointmentForResponse(appointment);
     } catch (error) {
       console.error('Get appointment by ID error:', error);
-      throw new Error(`Failed to retrieve appointment: ${error.message}`);
+      throw new Error('Failed to retrieve appointment: ' + error.message);
     }
   }
   

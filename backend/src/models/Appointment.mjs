@@ -92,12 +92,45 @@ const AppointmentSchema = new mongoose.Schema(
     toJSON: { 
       virtuals: true,
       transform: function(doc, ret) {
-        // Convert ObjectId fields to strings for proper JSON serialization
-        if (ret._id) ret._id = ret._id.toString();
-        if (ret.patientId) ret.patientId = ret.patientId.toString();
-        if (ret.doctorId) ret.doctorId = ret.doctorId.toString();
-        if (ret.timeSlotId) ret.timeSlotId = ret.timeSlotId.toString();
-        if (ret.preliminaryAssessmentId) ret.preliminaryAssessmentId = ret.preliminaryAssessmentId.toString();
+        // Ensure all ObjectId fields are serialized as strings
+        const objectIdFields = ['_id', 'patientId', 'doctorId', 'timeSlotId', 'preliminaryAssessmentId'];
+        
+        objectIdFields.forEach(field => {
+          if (ret[field]) {
+            if (typeof ret[field] === 'object' && ret[field] !== null) {
+              ret[field] = ret[field].toString();
+            }
+          }
+        });
+        
+        // Also handle any nested documents that might have ObjectIds
+        if (ret.patient && ret.patient._id) {
+          ret.patient._id = ret.patient._id.toString();
+        }
+        
+        if (ret.doctor && ret.doctor._id) {
+          ret.doctor._id = ret.doctor._id.toString();
+        }
+        
+        if (ret.patientUser && ret.patientUser._id) {
+          ret.patientUser._id = ret.patientUser._id.toString();
+        }
+        
+        if (ret.doctorUser && ret.doctorUser._id) {
+          ret.doctorUser._id = ret.doctorUser._id.toString();
+        }
+        
+        // Format date fields if they are Date objects
+        if (ret.date instanceof Date) {
+          const date = new Date(ret.date);
+          if (!isNaN(date.getTime())) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            ret.date = `${year}-${month}-${day}`;
+          }
+        }
+        
         return ret;
       }
     },

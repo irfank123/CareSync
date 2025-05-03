@@ -15,9 +15,20 @@ const AuditLogSchema = new mongoose.Schema(
     },
     resource: {
       type: String,
-      enum: ['user', 'patient', 'doctor', 'appointment', 'assessment', 'consultation', 'prescription', 'notification', 'system', 'timeslot', 'timeslots'],
       required: true,
-      index: true
+      enum: [
+        'user', 
+        'patient', 
+        'doctor', 
+        'appointment', 
+        'availability',
+        'assessment',
+        'timeslot',
+        'my-appointments',
+        'login', 
+        'logout',
+        'register'
+      ]
     },
     resourceId: {
       type: mongoose.Schema.Types.ObjectId

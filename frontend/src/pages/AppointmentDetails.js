@@ -41,6 +41,8 @@ import axios from 'axios';
 import { Link as RouterLink } from 'react-router-dom';
 import { format, parseISO } from 'date-fns';
 import { isValidDate, isValidTime, formatDate, formatDateAndTime } from '../utils/dateUtils';
+import { safeObjectId } from '../utils/stringUtils';
+import { appointmentService } from '../services/api';
 
 const AppointmentDetails = () => {
   const { id } = useParams();
@@ -105,68 +107,17 @@ const AppointmentDetails = () => {
     }
   };
 
-  const getAppointmentId = () => {
-    // Helper to safely convert any value to a string ID
-    const safeToString = (value) => {
-      if (!value) return null;
-      
-      // If it's already a string
-      if (typeof value === 'string') {
-        // Check for invalid string formats
-        if (value === 'undefined' || value === 'null' || 
-            value.includes('[object Object]') || value.includes('buffer')) {
-          console.log('Rejecting invalid string ID:', value);
-          return null;
-        }
-        return value;
-      }
-      
-      // Handle MongoDB ObjectID or similar objects
-      if (typeof value === 'object' && value !== null) {
-        // If it has _id property (MongoDB document)
-        if (value._id) {
-          if (typeof value._id === 'string') {
-            return value._id;
-          } else if (typeof value._id === 'object' && value._id !== null) {
-            // ObjectId nested inside an object
-            return safeToString(value._id);
-          }
-        }
-        
-        // If it's a MongoDB ObjectID directly
-        if (value.toString && typeof value.toString === 'function') {
-          const stringValue = value.toString();
-          if (stringValue === '[object Object]' || stringValue.includes('buffer')) {
-            console.log('Rejecting object with generic toString:', stringValue);
-            return null;
-          }
-          return stringValue;
-        }
-        
-        // Try stringifying the object if nothing else works
-        try {
-          const stringValue = String(value);
-          if (stringValue !== '[object Object]') {
-            return stringValue;
-          }
-        } catch (e) {
-          console.error('Error stringifying object:', e);
-        }
-      }
-      
-      console.log('Rejecting invalid ID type:', typeof value);
-      return null;
-    };
-    
+  // Use our utility function in getAppointmentId
+  const getAppointmentId = () => {    
     // Try to get ID from URL params first
-    const urlId = safeToString(id);
+    const urlId = safeObjectId(id);
     if (urlId) {
       console.log('Using ID from URL params:', urlId);
       return urlId;
     }
     
     // Next try query params
-    const qId = safeToString(queryId);
+    const qId = safeObjectId(queryId);
     if (qId) {
       console.log('Using ID from query params:', qId);
       return qId;
@@ -176,7 +127,7 @@ const AppointmentDetails = () => {
     try {
       const recentlyViewed = JSON.parse(sessionStorage.getItem('recentlyViewedAppointments') || '[]');
       if (Array.isArray(recentlyViewed) && recentlyViewed.length > 0) {
-        const firstId = safeToString(recentlyViewed[0]);
+        const firstId = safeObjectId(recentlyViewed[0]);
         if (firstId) {
           console.log('Using ID from sessionStorage recentlyViewedAppointments:', firstId);
           return firstId;
@@ -187,23 +138,10 @@ const AppointmentDetails = () => {
     }
     
     // Lastly try local storage
-    const currentId = safeToString(localStorage.getItem('currentAppointmentId'));
+    const currentId = safeObjectId(localStorage.getItem('currentAppointmentId'));
     if (currentId) {
       console.log('Using ID from localStorage currentAppointmentId:', currentId);
       return currentId;
-    }
-    
-    // For backward compatibility
-    const sessionId = safeToString(sessionStorage.getItem('appointmentId'));
-    if (sessionId) {
-      console.log('Using ID from sessionStorage appointmentId:', sessionId);
-      return sessionId;
-    }
-    
-    const localId = safeToString(localStorage.getItem('appointmentId'));
-    if (localId) {
-      console.log('Using ID from localStorage appointmentId:', localId);
-      return localId;
     }
     
     // Nothing valid found
@@ -255,13 +193,42 @@ const AppointmentDetails = () => {
       setAssessmentError('Cannot load assessment: invalid appointment ID format');
       return;
     }
-
+    
     const fetchAssessmentData = async () => {
       try {
         setLoadingAssessment(true);
         console.log('Fetching assessment with appointment ID:', cleanId);
         console.log(`Making assessment API request to: ${API_BASE_URL}/assessments/by-appointment/${cleanId}`);
         
+        // If patient, only check if assessment exists without fetching full data
+        if (isPatient) {
+          const response = await fetch(`${API_BASE_URL}/assessments/exists/${cleanId}`, {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token')}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Assessment exists API error:', response.status, errorText);
+            throw new Error('Failed to check assessment status');
+          }
+          
+          const data = await response.json();
+          console.log('Assessment exists API response:', data);
+          
+          if (data.success && data.exists) {
+            console.log('Assessment exists for this appointment');
+            setAssessment({ exists: true }); // Just mark that it exists without loading details
+          } else {
+            console.log('No assessment found for this appointment');
+            setAssessment(null);
+          }
+          return;
+        }
+        
+        // For doctors, load the full assessment data
         const response = await fetch(`${API_BASE_URL}/assessments/by-appointment/${cleanId}`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`,
@@ -272,13 +239,13 @@ const AppointmentDetails = () => {
         if (!response.ok) {
           const errorText = await response.text();
           console.error('Assessment API error:', response.status, errorText);
-          throw new Error(`API error: ${response.status} ${response.statusText}`);
+          throw new Error('Failed to load assessment data');
         }
         
         const data = await response.json();
         console.log('Assessment API response:', data);
         
-        if (data && data.success && data.data) {
+        if (data.success && data.data) {
           console.log('Successfully retrieved assessment data');
           setAssessment(data.data);
           // If the user is a doctor, automatically display the assessment
@@ -287,9 +254,8 @@ const AppointmentDetails = () => {
           }
         } else {
           console.log('No assessment data found for this appointment');
-          if (isDoctor) {
-            setAssessmentError('No pre-visit assessment has been completed for this appointment.');
-          }
+          setAssessment(null);
+          setAssessmentError('No pre-visit assessment has been completed for this appointment.');
         }
       } catch (err) {
         console.error('Error fetching assessment:', err);
@@ -298,9 +264,9 @@ const AppointmentDetails = () => {
         setLoadingAssessment(false);
       }
     };
-
+    
     fetchAssessmentData();
-  }, [isDoctor]);
+  }, [isDoctor, isPatient]);
 
   // Fetch timeslot data when appointment data is available
   useEffect(() => {
@@ -524,37 +490,36 @@ const AppointmentDetails = () => {
   };
 
   const fetchAssessment = async (assessmentId) => {
-    if (!assessmentId || !isDoctor) {
-      setLoading(false);
-      return;
-    }
-
     try {
-      setLoadingAssessment(true);
-      const response = await axios.get(`/api/assessments/${assessmentId}`);
-      setAssessment(response.data);
-    } catch (err) {
-      console.error("Error fetching assessment:", err);
-      setAssessmentError("Failed to load assessment data");
-    } finally {
-      setLoadingAssessment(false);
-      setLoading(false);
+      const response = await axios.get(`${API_BASE_URL}/assessments/${assessmentId}`);
+      return response.data.data;
+    } catch (error) {
+      console.error('Error fetching assessment:', error);
+      return null;
     }
   };
 
   const handleCancel = async () => {
     try {
+      if (!appointment) return;
+      
+      // Get appointment ID as string
+      const appointmentId = safeObjectId(appointment._id);
+      if (!appointmentId) {
+        setError('Invalid appointment ID');
+        return;
+      }
+      
       setLoading(true);
-      await axios.patch(`/api/appointments/${appointment._id}/cancel`, { 
-        reason: cancelReason 
-      });
+      await appointmentService.cancelAppointment(appointmentId, { reason: cancelReason });
+      
       // Refresh appointment data
-      const response = await axios.get(`/api/appointments/${appointment._id}`);
-      setAppointment(response.data);
-    setOpenCancelDialog(false);
+      const response = await appointmentService.getById(appointmentId);
+      setAppointment(response.data.data);
+      setOpenCancelDialog(false);
     } catch (err) {
-      console.error("Error cancelling appointment:", err);
-      setError("Failed to cancel appointment");
+      console.error('Error cancelling appointment:', err);
+      setError('Failed to cancel appointment. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -562,22 +527,38 @@ const AppointmentDetails = () => {
 
   const handleEditSubmit = async (updatedData) => {
     try {
+      if (!appointment) return;
+      
+      // Get appointment ID as string
+      const appointmentId = safeObjectId(appointment._id);
+      if (!appointmentId) {
+        setError('Invalid appointment ID');
+        return;
+      }
+      
       setLoading(true);
-      await axios.patch(`/api/appointments/${appointment._id}`, updatedData);
-      // Refresh appointment data
-      const response = await axios.get(`/api/appointments/${appointment._id}`);
-      setAppointment(response.data);
-    setOpenEditDialog(false);
+      const response = await appointmentService.updateAppointment(appointmentId, updatedData);
+      setAppointment(response.data.data);
+      setOpenEditDialog(false);
     } catch (err) {
-      console.error("Error updating appointment:", err);
-      setError("Failed to update appointment");
+      console.error('Error updating appointment:', err);
+      setError('Failed to update appointment. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleStartAssessment = () => {
-    navigate(`/assessments/new?appointmentId=${appointment._id}`);
+    if (!appointment) return;
+    
+    // Get appointment ID as string
+    const appointmentId = safeObjectId(appointment._id);
+    if (!appointmentId) {
+      setError('Invalid appointment ID');
+      return;
+    }
+    
+    navigate(`/assessments/new?appointmentId=${appointmentId}`);
   };
 
   const toggleAssessmentView = () => {
@@ -589,19 +570,21 @@ const AppointmentDetails = () => {
       setLoading(true);
       console.log('Fetching appointment data with ID:', appointmentId);
       
-      // Add a validation check for proper ID format
-      if (!appointmentId || typeof appointmentId !== 'string' || appointmentId.trim() === '') {
-        console.error('Invalid appointment ID format:', appointmentId);
-        throw new Error("Invalid appointment ID");
+      // Check if this is a temporary ID that won't work with the backend
+      if (appointmentId && appointmentId.startsWith('temp-')) {
+        console.error('Temporary ID detected - this will not work with the backend:', appointmentId);
+        throw new Error('Invalid appointment ID: The appointment may have been corrupted or not properly saved. Please return to the appointments list and try again.');
       }
       
-      console.log(`Making API request to: ${API_BASE_URL}/appointments/${appointmentId}`);
-      const response = await axios.get(`${API_BASE_URL}/appointments/${appointmentId}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      // Add validation check for valid MongoDB ObjectID format
+      const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(appointmentId);
+      if (!isValidObjectId) {
+        console.error('Invalid MongoDB ObjectID format:', appointmentId);
+        throw new Error("Invalid appointment ID format. Please return to the appointments list and select a valid appointment.");
+      }
+      
+      console.log(`Making API request using appointmentService.getById`);
+      const response = await appointmentService.getById(appointmentId);
       
       console.log('Appointment API response:', response.data);
       
@@ -709,25 +692,49 @@ const AppointmentDetails = () => {
   if (error) {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-        <Alert severity="error">{error}</Alert>
+        <Paper sx={{ p: 3, mb: 4, backgroundColor: '#FFF4F4', borderLeft: '4px solid #F44336' }}>
+          <Typography variant="h5" color="error" gutterBottom>
+            Unable to Load Appointment
+          </Typography>
+          <Typography gutterBottom>
+            {error.message || "There was an error loading this appointment."}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" paragraph>
+            This may be due to an invalid appointment ID, network error, or permission issue.
+          </Typography>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={() => navigate('/appointments')}
+            startIcon={<ArrowBack />}
+          >
+            Return to Appointments
+          </Button>
+        </Paper>
       </Container>
     );
   }
 
   // If no appointment data is available
   if (!appointment) {
-  return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-        <Alert severity="warning">Appointment not found. Please go back to the appointments list.</Alert>
-        <Button
-          variant="contained" 
-          color="primary" 
-          component={RouterLink} 
-          to="/appointments"
-          sx={{ mt: 2 }}
-        >
-          Back to Appointments
-        </Button>
+    return (
+      <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+        <Paper sx={{ p: 3, mb: 4, backgroundColor: '#FFF4F4', borderLeft: '4px solid #F44336' }}>
+          <Typography variant="h5" color="error" gutterBottom>
+            Appointment Not Found
+          </Typography>
+          <Typography gutterBottom>
+            The appointment you're looking for could not be found.
+          </Typography>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={() => navigate('/appointments')}
+            startIcon={<ArrowBack />}
+          >
+            Return to Appointments
+          </Button>
+        </Paper>
       </Container>
     );
   }
@@ -781,44 +788,44 @@ const AppointmentDetails = () => {
             <Typography variant="h5" fontWeight="medium">
               {appointment?.type} Appointment
             </Typography>
-      </Box>
+          </Box>
 
-      <Grid container spacing={3}>
-        {/* Main Details */}
+          <Grid container spacing={3}>
+            {/* Main Details */}
             <Grid item xs={12} sm={8}>
-          <Paper sx={{ p: 3, mb: 3 }}>
+              <Paper sx={{ p: 3, mb: 3 }}>
                 <Typography variant="h6" gutterBottom>
                   Appointment Information
-            </Typography>
+                </Typography>
                 <Divider sx={{ mb: 2 }} />
                 
                 <Grid container spacing={2}>
                   {/* Date */}
-              <Grid item xs={12} sm={6}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                  <CalendarMonth color="primary" />
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Date
-                    </Typography>
-                    <Typography>
-                      {(() => {
-                        // Directly use appointment date if available
-                        if (appointment?.date) {
-                          return formatDateFromISO(appointment.date);
-                        }
-                        
-                        // Fallback to timeslot date
-                        if (timeslot?.date) {
-                          return formatDateFromISO(timeslot.date);
-                        }
-                        
-                        return getDateFromTimesOrToday();
-                      })()}
-                    </Typography>
-                  </Box>
-                </Box>
-              </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                      <CalendarMonth color="primary" />
+                      <Box>
+                        <Typography variant="body2" color="text.secondary">
+                          Date
+                        </Typography>
+                        <Typography>
+                          {(() => {
+                            // Directly use appointment date if available
+                            if (appointment?.date) {
+                              return formatDateFromISO(appointment.date);
+                            }
+                            
+                            // Fallback to timeslot date
+                            if (timeslot?.date) {
+                              return formatDateFromISO(timeslot.date);
+                            }
+                            
+                            return getDateFromTimesOrToday();
+                          })()}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
                   
                   {/* Time */}
                   <Grid item xs={12} sm={6}>
@@ -827,24 +834,24 @@ const AppointmentDetails = () => {
                       <Box>
                         <Typography variant="body2" color="text.secondary">
                           Time
-                    </Typography>
-                    <Typography>
+                        </Typography>
+                        <Typography>
                           {isValidTime(appointment?.startTime) && isValidTime(appointment?.endTime) 
                             ? `${appointment.startTime} - ${appointment.endTime}` 
                             : 'Time not specified'}
-                    </Typography>
-                  </Box>
-                </Box>
-              </Grid>
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
                   
                   {/* Duration */}
-              <Grid item xs={12} sm={6}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                  <AccessTime color="primary" />
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Duration
-                    </Typography>
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                      <AccessTime color="primary" />
+                      <Box>
+                        <Typography variant="body2" color="text.secondary">
+                          Duration
+                        </Typography>
                         <Typography>
                           {calculateDuration(appointment?.startTime, appointment?.endTime)}
                         </Typography>
@@ -875,75 +882,75 @@ const AppointmentDetails = () => {
                             Join Video Call
                           </Typography>
                         )}
-                  </Box>
-                </Box>
-              </Grid>
-            </Grid>
+                      </Box>
+                    </Box>
+                  </Grid>
+                </Grid>
                 
-            <Divider sx={{ my: 2 }} />
+                <Divider sx={{ my: 2 }} />
                 
                 {/* Reason for visit */}
-            <Box>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
+                <Box>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
                     Reason for Visit
                   </Typography>
                   <Typography>
                     {appointment?.reasonForVisit || appointment?.notes || 'No reason specified'}
-              </Typography>
-            </Box>
+                  </Typography>
+                </Box>
 
-          {/* Actions */}
+                {/* Actions */}
                 <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
                   {appointment?.status === 'upcoming' && (
                     <>
-              {isDoctor && (
-                <Button
-                  variant="contained"
-                  startIcon={<Edit />}
-                  onClick={() => setOpenEditDialog(true)}
-                >
-                  Edit Appointment
-                </Button>
-              )}
-              <Button
-                variant="outlined"
-                color="error"
-                startIcon={<Cancel />}
-                onClick={() => setOpenCancelDialog(true)}
-              >
-                Cancel Appointment
-              </Button>
+                      {isDoctor && (
+                        <Button
+                          variant="contained"
+                          startIcon={<Edit />}
+                          onClick={() => setOpenEditDialog(true)}
+                        >
+                          Edit Appointment
+                        </Button>
+                      )}
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        startIcon={<Cancel />}
+                        onClick={() => setOpenCancelDialog(true)}
+                      >
+                        Cancel Appointment
+                      </Button>
                       {!isDoctor && !assessment && (
-                <Button
-                  variant="contained"
-                  color="secondary"
-                  startIcon={<Notes />}
+                        <Button
+                          variant="contained"
+                          color="secondary"
+                          startIcon={<Notes />}
                           onClick={handleStartAssessment}
-                >
-                  Start AI Assessment
-                </Button>
+                        >
+                          Start AI Assessment
+                        </Button>
                       )}
                     </>
-              )}
-            </Box>
+                  )}
+                </Box>
               </Paper>
-        </Grid>
+            </Grid>
 
-        {/* Participant Details */}
+            {/* Participant Details */}
             <Grid item xs={12} sm={4}>
               <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              {isDoctor ? 'Patient Details' : 'Doctor Details'}
-            </Typography>
+                <Typography variant="h6" gutterBottom>
+                  {isDoctor ? 'Patient Details' : 'Doctor Details'}
+                </Typography>
                 <Divider sx={{ mb: 2 }} />
                 
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
-              <Person color="primary" />
-              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+                  <Person color="primary" />
+                  <Box>
                     <Typography variant="body2" color="text.secondary" gutterBottom>
                       Name
                     </Typography>
-                <Typography>
+                    <Typography>
                       {isDoctor && appointment.patient ? 
                         (appointment.patientUser ? 
                           `${appointment.patientUser.firstName} ${appointment.patientUser.lastName}` : 
@@ -955,9 +962,9 @@ const AppointmentDetails = () => {
                             (appointment.doctor.name || 'Unknown'))
                           : 'Unknown')
                       }
-                </Typography>
-              </Box>
-            </Box>
+                    </Typography>
+                  </Box>
+                </Box>
                 
                 {isDoctor && appointment.patientUser && (
                   <>
@@ -979,25 +986,25 @@ const AppointmentDetails = () => {
                     </Box>
                     {appointment.patient?.dateOfBirth && (
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Box>
-                <Typography variant="body2" color="text.secondary" gutterBottom>
+                        <Box>
+                          <Typography variant="body2" color="text.secondary" gutterBottom>
                             Date of Birth
                           </Typography>
                           <Typography>
                             {isValidDate(appointment.patient.dateOfBirth) ? 
                               formatDate(appointment.patient.dateOfBirth, 'MMMM dd, yyyy') : 'N/A'}
-                </Typography>
+                          </Typography>
                         </Box>
-              </Box>
+                      </Box>
                     )}
                   </>
-            )}
-          </Paper>
-        </Grid>
-      </Grid>
+                )}
+              </Paper>
+            </Grid>
+          </Grid>
 
           {/* Assessment Section */}
-          {assessment && (
+          {assessment && isDoctor && (
             <Paper sx={{ p: 3, mt: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6">
@@ -1032,16 +1039,31 @@ const AppointmentDetails = () => {
             </Paper>
           )}
 
-          {/* Assessment loading state */}
-          {loadingAssessment && (
+          {/* Patient Assessment Completion Status */}
+          {assessment && isPatient && (
+            <Paper sx={{ p: 3, mt: 2, bgcolor: '#e8f5e9' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <CheckCircle color="success" />
+                <Typography variant="h6">
+                  Pre-Visit Assessment Completed
+                </Typography>
+              </Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Thank you for completing your pre-visit assessment. Your doctor will review it before your appointment.
+              </Typography>
+            </Paper>
+          )}
+
+          {/* Assessment loading state - only visible to doctors */}
+          {loadingAssessment && isDoctor && (
             <Box sx={{ display: 'flex', justifyContent: 'center', my: 3 }}>
               <CircularProgress size={24} sx={{ mr: 1 }} />
               <Typography>Loading assessment data...</Typography>
             </Box>
           )}
 
-          {/* Assessment error */}
-          {assessmentError && (
+          {/* Assessment error - only visible to doctors */}
+          {assessmentError && isDoctor && (
             <Paper sx={{ p: 2, mt: 3, bgcolor: '#fff2f2', borderLeft: '4px solid #f44336' }}>
               <Typography variant="body2" color="error">
                 {assessmentError}
@@ -1051,10 +1073,10 @@ const AppointmentDetails = () => {
 
           {/* Dialogs */}
           <Dialog open={openCancelDialog} onClose={() => setOpenCancelDialog(false)}>
-        <DialogTitle>Cancel Appointment</DialogTitle>
-        <DialogContent>
+            <DialogTitle>Cancel Appointment</DialogTitle>
+            <DialogContent>
               <DialogContentText gutterBottom>
-              Are you sure you want to cancel this appointment?
+                Are you sure you want to cancel this appointment?
               </DialogContentText>
               <TextField
                 fullWidth
@@ -1065,12 +1087,12 @@ const AppointmentDetails = () => {
                 multiline
                 rows={3}
               />
-          </DialogContent>
-          <DialogActions>
+            </DialogContent>
+            <DialogActions>
               <Button onClick={() => setOpenCancelDialog(false)}>No, Keep It</Button>
               <Button color="error" onClick={handleCancel}>Yes, Cancel It</Button>
-          </DialogActions>
-        </Dialog>
+            </DialogActions>
+          </Dialog>
         </>
       )}
     </Container>

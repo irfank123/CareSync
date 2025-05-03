@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { safeObjectId } from '../utils/stringUtils';
 
 // Validate environment variables
 if (!process.env.REACT_APP_API_URL) {
@@ -150,29 +151,124 @@ export const authService = {
 export const appointmentService = {
   create: (appointmentData) => api.post('/appointments', appointmentData),
   getAll: () => api.get('/appointments'),
-  getById: (id) => api.get(`/appointments/${id}`),
-  update: (id, appointmentData) => api.put(`/appointments/${id}`, appointmentData),
-  delete: (id) => api.delete(`/appointments/${id}`),
-  getPatientAppointments: (patientId) => api.get(`/appointments/patient/${patientId}`),
-  getDoctorAppointments: (doctorId) => api.get(`/appointments/doctor/${doctorId}`),
+  getById: (id) => {
+    // More strict ID validation before making API call
+    if (!id) {
+      console.error('Null or undefined appointment ID passed to getById');
+      return Promise.reject(new Error('Invalid appointment ID'));
+    }
+    
+    // Check for temporary IDs that we know will fail
+    if (typeof id === 'string' && id.startsWith('temp-')) {
+      console.error('Temporary ID detected that backend will reject:', id);
+      return Promise.reject(new Error('Invalid appointment ID format'));
+    }
+    
+    // Validate MongoDB ObjectID format
+    const isValidObjectId = typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id);
+    if (!isValidObjectId) {
+      console.error('Invalid MongoDB ObjectID format:', id);
+      return Promise.reject(new Error('Invalid appointment ID format'));
+    }
+    
+    // If we passed all validation, make the API call with the ID as-is
+    return api.get(`/appointments/${id}`);
+  },
+  update: (id, appointmentData) => {
+    // Use our safe utility to handle object IDs
+    const safeId = safeObjectId(id) || id;
+    return api.put(`/appointments/${safeId}`, appointmentData);
+  },
+  delete: (id) => {
+    // Use our safe utility to handle object IDs
+    const safeId = safeObjectId(id) || id;
+    return api.delete(`/appointments/${safeId}`);
+  },
+  getPatientAppointments: (patientId) => {
+    // Use our safe utility to handle object IDs
+    const safeId = safeObjectId(patientId) || patientId;
+    return api.get(`/appointments/patient/${safeId}`);
+  },
+  getDoctorAppointments: (doctorId) => {
+    // Use our safe utility to handle object IDs
+    const safeId = safeObjectId(doctorId) || doctorId;
+    return api.get(`/appointments/doctor/${safeId}`);
+  },
   getUpcomingAppointments: () => api.get('/appointments/upcoming'),
   getMyAppointments: () => api.get('/appointments/me'),
+  // Add methods to handle object ID issues
+  cancelAppointment: (id, reason) => {
+    const safeId = safeObjectId(id) || id;
+    return api.patch(`/appointments/${safeId}/cancel`, reason);
+  },
+  updateAppointment: (id, data) => {
+    const safeId = safeObjectId(id) || id;
+    return api.patch(`/appointments/${safeId}`, data);
+  }
 };
 
 export const doctorService = {
   getAll: () => api.get('/doctors'),
-  getById: (id) => api.get(`/doctors/${id}`),
-  getByUserId: (userId) => api.get(`/doctors/user/${userId}`),
-  getAvailability: (id) => api.get(`/doctors/${id}/availability`),
-  updateProfile: (id, profileData) => api.put(`/doctors/${id}`, profileData),
+  getById: (id) => {
+    // Ensure ID is a string
+    const safeId = typeof id === 'object' && id !== null 
+      ? (id.toString ? id.toString() : String(id)) 
+      : String(id);
+    return api.get(`/doctors/${safeId}`);
+  },
+  getByUserId: (userId) => {
+    // Ensure user ID is a string
+    const safeId = typeof userId === 'object' && userId !== null 
+      ? (userId.toString ? userId.toString() : String(userId)) 
+      : String(userId);
+    return api.get(`/doctors/user/${safeId}`);
+  },
+  getAvailability: (id) => {
+    // Ensure ID is a string
+    const safeId = typeof id === 'object' && id !== null 
+      ? (id.toString ? id.toString() : String(id)) 
+      : String(id);
+    return api.get(`/doctors/${safeId}/availability`);
+  },
+  updateProfile: (id, profileData) => {
+    // Ensure ID is a string
+    const safeId = typeof id === 'object' && id !== null 
+      ? (id.toString ? id.toString() : String(id)) 
+      : String(id);
+    return api.put(`/doctors/${safeId}`, profileData);
+  },
 };
 
 export const patientService = {
   getAll: () => api.get('/patients'),
-  getById: (id) => api.get(`/patients/${id}`),
-  getByUserId: (userId) => api.get(`/patients/user/${userId}`),
-  updateProfile: (id, profileData) => api.put(`/patients/${id}`, profileData),
-  getMedicalHistory: (id) => api.get(`/patients/${id}/medical-history`),
+  getById: (id) => {
+    // Ensure ID is a string
+    const safeId = typeof id === 'object' && id !== null 
+      ? (id.toString ? id.toString() : String(id)) 
+      : String(id);
+    return api.get(`/patients/${safeId}`);
+  },
+  getByUserId: (userId) => {
+    // Ensure user ID is a string
+    const safeId = typeof userId === 'object' && userId !== null 
+      ? (userId.toString ? userId.toString() : String(userId)) 
+      : String(userId);
+    return api.get(`/patients/user/${safeId}`);
+  },
+  updateProfile: (id, profileData) => {
+    // Ensure ID is a string
+    const safeId = typeof id === 'object' && id !== null 
+      ? (id.toString ? id.toString() : String(id)) 
+      : String(id);
+    return api.put(`/patients/${safeId}`, profileData);
+  },
+  getMedicalHistory: (id) => {
+    // Ensure ID is a string
+    const safeId = typeof id === 'object' && id !== null 
+      ? (id.toString ? id.toString() : String(id)) 
+      : String(id);
+    return api.get(`/patients/${safeId}/medical-history`);
+  },
 };
 
 export default api;

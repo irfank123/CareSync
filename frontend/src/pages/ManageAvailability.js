@@ -472,33 +472,40 @@ const ManageAvailability = () => {
               </Typography>
             ) : (
               <Grid container spacing={2}>
-                {timeSlots.map((slot) => (
-                  <Grid item xs={12} sm={6} md={4} key={slot._id}>
-                    <Paper sx={{ p: 2, position: 'relative' }}>
-                      <Typography variant="subtitle1">
-                        {format(parse(slot.startTime, 'HH:mm', new Date()), 'h:mm a')} -{' '}
-                        {format(parse(slot.endTime, 'HH:mm', new Date()), 'h:mm a')}
-                      </Typography>
-                      <Box sx={{ mt: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Chip 
-                          size="small"
-                          label={slot.status.charAt(0).toUpperCase() + slot.status.slice(1)}
-                          color={slot.status === 'available' ? 'success' : slot.status === 'booked' ? 'primary' : 'default'}
-                        />
-                        <Button
-                          size="small"
-                          color="error"
-                          onClick={() => handleDeleteSlot(slot._id)}
-                          sx={{ position: 'absolute', top: 8, right: 8 }}
-                          disabled={slot.status === 'booked'}
-                          title={slot.status === 'booked' ? "Cannot delete booked slots" : "Delete this slot"}
-                        >
-                          Delete
-                        </Button>
-                      </Box>
-                    </Paper>
-                  </Grid>
-                ))}
+                {timeSlots.map((slot) => {
+                  // Convert slot ID to string to use as key
+                  const slotIdStr = typeof slot._id === 'object' && slot._id !== null 
+                    ? (slot._id.toString ? slot._id.toString() : String(slot._id)) 
+                    : String(slot._id);
+                    
+                  return (
+                    <Grid item xs={12} sm={6} md={4} key={slotIdStr}>
+                      <Paper sx={{ p: 2, position: 'relative' }}>
+                        <Typography variant="subtitle1">
+                          {format(parse(slot.startTime, 'HH:mm', new Date()), 'h:mm a')} -{' '}
+                          {format(parse(slot.endTime, 'HH:mm', new Date()), 'h:mm a')}
+                        </Typography>
+                        <Box sx={{ mt: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Chip 
+                            size="small"
+                            label={slot.status.charAt(0).toUpperCase() + slot.status.slice(1)}
+                            color={slot.status === 'available' ? 'success' : slot.status === 'booked' ? 'primary' : 'default'}
+                          />
+                          <Button
+                            size="small"
+                            color="error"
+                            onClick={() => handleDeleteSlot(slot._id)}
+                            sx={{ position: 'absolute', top: 8, right: 8 }}
+                            disabled={slot.status === 'booked'}
+                            title={slot.status === 'booked' ? "Cannot delete booked slots" : "Delete this slot"}
+                          >
+                            Delete
+                          </Button>
+                        </Box>
+                      </Paper>
+                    </Grid>
+                  );
+                })}
               </Grid>
             )}
           </Paper>

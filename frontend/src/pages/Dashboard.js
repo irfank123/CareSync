@@ -41,8 +41,10 @@ import {
   Cancel,
   Schedule,
 } from '@mui/icons-material';
-import { appointmentService } from '../services/api';
+import { appointmentService, patientService, doctorService } from '../services/api';
 import { format } from 'date-fns';
+import { safeObjectId } from '../utils/stringUtils';
+import { Doughnut } from 'react-chartjs-2';
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -267,26 +269,47 @@ const Dashboard = () => {
                   <TableCell colSpan={5} align="center">No appointments scheduled for today</TableCell>
                 </TableRow>
               ) : (
-                upcomingAppointments.map((appointment) => (
-                  <TableRow key={appointment._id}>
-                    <TableCell>{appointment.startTime}</TableCell>
-                    <TableCell>
-                      {`${appointment.patientUser?.firstName || ''} ${appointment.patientUser?.lastName || ''}`}
-                    </TableCell>
-                    <TableCell>{appointment.type}</TableCell>
-                    <TableCell>{getStatusChip(appointment.status)}</TableCell>
-                    <TableCell>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        component={RouterLink}
-                        to={`/appointments/${appointment._id}`}
-                      >
-                        View Details
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
+                upcomingAppointments.map((appointment, index) => {
+                  // Generate a safe string key from appointment ID
+                  const appointmentIdStr = safeObjectId(appointment._id);
+                  
+                  return (
+                    <TableRow key={appointmentIdStr || `appointment-${index}`}>
+                      <TableCell>{appointment.startTime}</TableCell>
+                      <TableCell>
+                        {`${appointment.patientUser?.firstName || ''} ${appointment.patientUser?.lastName || ''}`}
+                      </TableCell>
+                      <TableCell>{appointment.type}</TableCell>
+                      <TableCell>{getStatusChip(appointment.status)}</TableCell>
+                      <TableCell>
+                        {appointmentIdStr ? (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            component={RouterLink}
+                            to={`/appointments/${appointmentIdStr}`}
+                            onClick={() => {
+                              // Store the ID in sessionStorage for reference in AppointmentDetails
+                              const recentlyViewed = JSON.parse(sessionStorage.getItem('recentlyViewedAppointments') || '[]');
+                              // Add this ID to the front of the array
+                              const updatedViewed = [appointmentIdStr, ...recentlyViewed.filter(id => id !== appointmentIdStr)];
+                              // Keep only the most recent 5
+                              sessionStorage.setItem('recentlyViewedAppointments', JSON.stringify(updatedViewed.slice(0, 5)));
+                              // Also store in localStorage as a fallback
+                              localStorage.setItem('currentAppointmentId', appointmentIdStr);
+                            }}
+                          >
+                            View Details
+                          </Button>
+                        ) : (
+                          <Button size="small" variant="outlined" disabled>
+                            View Details
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
@@ -491,41 +514,58 @@ const Dashboard = () => {
           </Box>
         ) : (
           <List>
-            {upcomingAppointments.map((appointment, index) => (
-              <React.Fragment key={appointment._id}>
-                <ListItem alignItems="flex-start">
-                  <ListItemAvatar>
-                    <Avatar>
-                      <AccessTime />
-                    </Avatar>
-                  </ListItemAvatar>
-                  <ListItemText
-                    primary={
-                      <Typography variant="subtitle1">
-                        {appointment.type}
-                      </Typography>
-                    }
-                    secondary={
-                      <>
-                        <Typography component="span" variant="body2" color="text.primary">
-                          {appointment.date ? new Date(appointment.date).toLocaleDateString() : 'No date'} at {appointment.startTime}
+            {upcomingAppointments.map((appointment, index) => {
+              // Generate a safe string key from appointment ID
+              const appointmentIdStr = safeObjectId(appointment._id);
+              
+              return (
+                <React.Fragment key={appointmentIdStr || `appointment-${index}`}>
+                  <ListItem alignItems="flex-start">
+                    <ListItemAvatar>
+                      <Avatar>
+                        <AccessTime />
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={
+                        <Typography variant="subtitle1">
+                          {appointment.type}
                         </Typography>
-                        {` with Dr. ${appointment.doctorUser?.firstName || ''} ${appointment.doctorUser?.lastName || ''}`}
-                      </>
-                    }
-                  />
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    component={RouterLink}
-                    to={`/appointments/${appointment._id}`}
-                  >
-                    View Details
-                  </Button>
-                </ListItem>
-                {index < upcomingAppointments.length - 1 && <Divider variant="inset" component="li" />}
-              </React.Fragment>
-            ))}
+                      }
+                      secondary={
+                        <>
+                          <Typography component="span" variant="body2" color="text.primary">
+                            {appointment.date ? new Date(appointment.date).toLocaleDateString() : 'No date'} at {appointment.startTime}
+                          </Typography>
+                          {` with Dr. ${appointment.doctorUser?.firstName || ''} ${appointment.doctorUser?.lastName || ''}`}
+                          {appointmentIdStr && (
+                            <Button
+                              size="small"
+                              component={RouterLink}
+                              to={`/appointments/${appointmentIdStr}`}
+                              onClick={() => {
+                                // Store the ID in sessionStorage for reference in AppointmentDetails
+                                const recentlyViewed = JSON.parse(sessionStorage.getItem('recentlyViewedAppointments') || '[]');
+                                // Add this ID to the front of the array
+                                const updatedViewed = [appointmentIdStr, ...recentlyViewed.filter(id => id !== appointmentIdStr)];
+                                // Keep only the most recent 5
+                                sessionStorage.setItem('recentlyViewedAppointments', JSON.stringify(updatedViewed.slice(0, 5)));
+                                // Also store in localStorage as a fallback
+                                localStorage.setItem('currentAppointmentId', appointmentIdStr);
+                              }}
+                              sx={{ mt: 1, display: 'block' }}
+                            >
+                              View Details
+                            </Button>
+                          )}
+                        </>
+                      }
+                    />
+                  </ListItem>
+                  {appointment !== upcomingAppointments[upcomingAppointments.length - 1] && <Divider variant="inset" component="li" />}
+                </React.Fragment>
+              );
+            })}
           </List>
         )}
       </Card>

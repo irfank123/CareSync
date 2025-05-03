@@ -219,6 +219,35 @@ class AssessmentController {
       return next(new ApiError(error.message, error.statusCode || 500));
     }
   }
+
+  /**
+   * Check if an assessment exists for a specific appointment without returning data.
+   * @param {Object} req - Express request object (params: {appointmentId})
+   * @param {Object} res - Express response object
+   * @param {Function} next - Express next middleware function
+   */
+  async checkAssessmentExists(req, res, next) {
+    try {
+      const { appointmentId } = req.params;
+
+      if (!validateObjectId(appointmentId)) {
+        return next(new ApiError('Invalid appointment ID', 400));
+      }
+
+      // Just check if assessment exists
+      const assessment = await assessmentService.getAssessmentForAppointment(appointmentId);
+
+      return res.status(200).json(
+        new ApiResponse(true, 'Assessment existence check completed', { 
+          exists: !!assessment,
+          appointmentId
+        })
+      );
+    } catch (error) {
+      console.error("Check Assessment Exists Controller Error:", error);
+      return next(new ApiError(error.message, error.statusCode || 500));
+    }
+  }
 }
 
 // Helper can likely be removed if not needed elsewhere, assuming patientService handles this

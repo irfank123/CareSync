@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import {
   Box,
@@ -28,8 +28,9 @@ import {
   Select,
   CircularProgress,
   Alert,
+  Snackbar,
 } from '@mui/material';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   CalendarMonth,
   List as ListIcon,
@@ -42,6 +43,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { format } from 'date-fns';
 import { appointmentService, patientService, doctorService } from '../services/api';
+import { safeObjectId } from '../utils/stringUtils';
 
 const Appointments = () => {
   const { user } = useAuth();
@@ -56,6 +58,11 @@ const Appointments = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [userId, setUserId] = useState(null);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [snackbarSeverity, setSnackbarSeverity] = useState('success');
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   // Helper function to validate dates
   const isValidDate = (date) => {
@@ -84,39 +91,70 @@ const Appointments = () => {
     }
   }, [user]);
 
-  // Fetch appointments
-  useEffect(() => {
-    const fetchAppointments = async () => {
-      try {
-        setLoading(true);
-        let response;
+  // Fetch appointments function wrapped in useCallback
+  const fetchAppointments = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null); // Clear previous errors
+      let response;
 
-        if (user?.role === 'doctor' && userId) {
-          response = await appointmentService.getDoctorAppointments(userId);
-        } else if (user?.role === 'patient') {
-          // Use the new /me endpoint for patients instead of requiring patientId
-          response = await appointmentService.getMyAppointments();
-        } else if (user?.role === 'admin' || user?.role === 'staff') {
-          // Admin or staff - get all appointments
-          response = await appointmentService.getAll();
-        }
-
-        if (response) {
-          const { data, totalPages: pages, currentPage: page } = response.data;
-          setAppointments(data || []);
-          setTotalPages(pages || 1);
-          setCurrentPage(page || 1);
-        }
-      } catch (err) {
-        console.error('Error fetching appointments:', err);
-        setError('Failed to load appointments');
-      } finally {
-        setLoading(false);
+      // Determine the correct service call based on user role
+      if (user?.role === 'doctor' && userId) {
+        // Fetch all appointments for this doctor (assuming getDoctorAppointments handles pagination/filtering if needed)
+        response = await appointmentService.getDoctorAppointments(userId); 
+      } else if (user?.role === 'patient') {
+        // Use the /me endpoint for patients
+        response = await appointmentService.getMyAppointments(); 
+      } else if (user?.role === 'admin' || user?.role === 'staff') {
+        // Admin or staff - get all appointments (ensure this supports pagination/filtering or adjust as needed)
+        response = await appointmentService.getAll(); 
+      } else {
+         console.log("User role not determined or doctor ID missing, skipping fetch.");
+         setLoading(false);
+         return; // Exit if user role isn't clear or doctor ID is missing
       }
-    };
 
-    fetchAppointments();
+      if (response?.data?.data) { // Check if response and data exists
+        const { data, totalPages: pages, currentPage: page } = response.data;
+        console.log("Fetched appointments:", data); // Log fetched data
+        setAppointments(data || []);
+        setTotalPages(pages || 1);
+        setCurrentPage(page || 1);
+      } else {
+         console.log("No appointment data received or empty response.");
+         setAppointments([]); // Set to empty array if no data
+      }
+    } catch (err) {
+      console.error('Error fetching appointments:', err);
+      setError(err.message || 'Failed to load appointments'); // Set more specific error
+      setAppointments([]); // Clear appointments on error
+    } finally {
+      setLoading(false);
+    }
   }, [user?.role, userId]);
+
+  // Initial fetch on component mount or when user/role changes
+  useEffect(() => {
+    // Only fetch if the user role is determined (and doctorId if applicable)
+    if (user?.role && (user.role !== 'doctor' || userId)) {
+        console.log(`Initial fetch triggered. Role: ${user.role}, DoctorId: ${userId}`);
+        fetchAppointments();
+    } else {
+        console.log("Skipping initial fetch: User role or doctor ID not ready.");
+        // If loading isn't stopped elsewhere when skipping, stop it here.
+        if(loading) setLoading(false); 
+    }
+  }, [fetchAppointments, user?.role, userId]); // Now depends on the memoized fetch function
+
+  // Effect to check for refresh flag from navigation state
+  useEffect(() => {
+    if (location.state?.needsRefresh) {
+      console.log("Detected 'needsRefresh' state, triggering appointments fetch.");
+      fetchAppointments();
+      // Clear the state to prevent re-fetching on subsequent renders/navigation
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, fetchAppointments, navigate]);
 
   const handleViewChange = (event, newValue) => {
     setView(newValue);
@@ -178,6 +216,31 @@ const Appointments = () => {
     return statusMapping[filter]?.includes(appointment.status);
   });
 
+  const handleViewClick = (appointmentId) => {
+    console.log('Storing appointment ID:', appointmentId);
+    // Check if it's a temporary ID
+    if (appointmentId && typeof appointmentId === 'string' && appointmentId.startsWith('temp-')) {
+      // Show error message
+      setSnackbarMessage("Cannot view details for this appointment - invalid ID format.");
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+    
+    // Check if it's a valid MongoDB ObjectID
+    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(appointmentId);
+    if (!isValidObjectId) {
+      // Show error message
+      setSnackbarMessage("Cannot view details: The appointment ID is not in a valid format.");
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+      return;
+    }
+    
+    // Valid ID, navigate to appointment details
+    navigate(`/appointments/${appointmentId}`);
+  };
+
   if (loading) {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4, display: 'flex', justifyContent: 'center' }}>
@@ -212,7 +275,23 @@ const Appointments = () => {
           </Button>
         )}
       </Box>
-
+      
+      {/* Snackbar for showing error messages */}
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={6000}
+        onClose={() => setSnackbarOpen(false)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert 
+          onClose={() => setSnackbarOpen(false)} 
+          severity={snackbarSeverity}
+          sx={{ width: '100%' }}
+        >
+          {snackbarMessage}
+        </Alert>
+      </Snackbar>
+      
       {/* Filters and View Toggle */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={4}>
@@ -235,7 +314,7 @@ const Appointments = () => {
               label="Filter by Date"
               value={selectedDate}
               onChange={(newValue) => setSelectedDate(newValue)}
-              renderInput={(params) => <TextField {...params} fullWidth />}
+              slotProps={{ textField: { fullWidth: true } }}
             />
           </LocalizationProvider>
         </Grid>
@@ -279,70 +358,65 @@ const Appointments = () => {
                   <TableCell colSpan={6} align="center">No appointments found</TableCell>
                 </TableRow>
               ) : (
-                filteredAppointments.map((appointment) => (
-                  <TableRow key={appointment._id}>
-                    <TableCell>
-                      {isDoctor 
-                        ? `${appointment.patientName || `${appointment.patientUser?.firstName || 'Unknown'} ${appointment.patientUser?.lastName || 'Patient'}`}` 
-                        : appointment.doctorName || `Dr. ${appointment.doctorUser?.firstName || 'Unknown'} ${appointment.doctorUser?.lastName || 'Doctor'}`}
-                    </TableCell>
-                    <TableCell>
-                      {appointment.date ? new Date(appointment.date).toLocaleDateString() : 'No date'}
-                    </TableCell>
-                    <TableCell>{appointment.startTime}</TableCell>
-                    <TableCell>{appointment.type}</TableCell>
-                    <TableCell>{getStatusChip(appointment.status)}</TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', gap: 1 }}>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          component={RouterLink}
-                          to={`/appointments/${String(appointment._id)}`}
-                          onClick={() => {
-                            // Ensure we're storing the ID as a string
-                            const appointmentId = typeof appointment._id === 'object' && appointment._id !== null 
-                              ? (appointment._id.toString ? appointment._id.toString() : String(appointment._id)) 
-                              : String(appointment._id);
-                            
-                            console.log('Storing appointment ID:', appointmentId);
-                            
-                            // Store the ID in sessionStorage for reference in AppointmentDetails
-                            const recentlyViewed = JSON.parse(sessionStorage.getItem('recentlyViewedAppointments') || '[]');
-                            // Add this ID to the front of the array
-                            const updatedViewed = [appointmentId, ...recentlyViewed.filter(id => id !== appointmentId)];
-                            // Keep only the most recent 5
-                            sessionStorage.setItem('recentlyViewedAppointments', JSON.stringify(updatedViewed.slice(0, 5)));
-                            // Also store in localStorage as a fallback
-                            localStorage.setItem('currentAppointmentId', appointmentId);
-                          }}
-                        >
-                          View
-                        </Button>
-                        {appointment.status === 'scheduled' && (
-                          <>
-                            {isDoctor && (
+                filteredAppointments.map((appointment, index) => {
+                  // Convert the appointment._id to a string for use as a key using our utility
+                  const appointmentIdStr = safeObjectId(appointment._id);
+                  
+                  return (
+                    <TableRow key={appointmentIdStr || `appointment-${index}`}>
+                      <TableCell>
+                        {isDoctor 
+                          ? `${appointment.patientName || `${appointment.patientUser?.firstName || 'Unknown'} ${appointment.patientUser?.lastName || 'Patient'}`}` 
+                          : appointment.doctorName || `Dr. ${appointment.doctorUser?.firstName || 'Unknown'} ${appointment.doctorUser?.lastName || 'Doctor'}`}
+                      </TableCell>
+                      <TableCell>
+                        {appointment.date ? new Date(appointment.date).toLocaleDateString() : 'No date'}
+                      </TableCell>
+                      <TableCell>{appointment.startTime}</TableCell>
+                      <TableCell>{appointment.type}</TableCell>
+                      <TableCell>{getStatusChip(appointment.status)}</TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          {appointmentIdStr ? (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              component={RouterLink}
+                              to={`/appointments/${appointmentIdStr}`}
+                              onClick={() => handleViewClick(appointmentIdStr)}
+                            >
+                              View
+                            </Button>
+                          ) : (
+                            <Button size="small" variant="outlined" disabled>
+                              View
+                            </Button>
+                          )}
+                          {appointment.status === 'scheduled' && (
+                            <>
+                              {isDoctor && (
+                                <IconButton
+                                  size="small"
+                                  color="primary"
+                                  onClick={() => {}}
+                                >
+                                  <Edit />
+                                </IconButton>
+                              )}
                               <IconButton
                                 size="small"
-                                color="primary"
+                                color="error"
                                 onClick={() => {}}
                               >
-                                <Edit />
+                                <Cancel />
                               </IconButton>
-                            )}
-                            <IconButton
-                              size="small"
-                              color="error"
-                              onClick={() => {}}
-                            >
-                              <Cancel />
-                            </IconButton>
-                          </>
-                        )}
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                ))
+                            </>
+                          )}
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
@@ -383,7 +457,7 @@ const Appointments = () => {
                 label="Date"
                 value={selectedDate}
                 onChange={(newValue) => setSelectedDate(newValue)}
-                renderInput={(params) => <TextField {...params} fullWidth />}
+                slotProps={{ textField: { fullWidth: true } }}
               />
             </LocalizationProvider>
             <TextField

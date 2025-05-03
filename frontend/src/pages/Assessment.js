@@ -131,10 +131,16 @@ const Assessment = () => {
   // Skip assessment logic might need adjustment based on UX requirements
   // For now, it could navigate back or to the appointment details.
   const handleSkip = () => {
-      console.log("Assessment skipped by user.");
-      // Optionally call skipAssessment service endpoint if backend logic requires it
-      // await assessmentService.skipAssessment(assessmentId, 'User skipped', req.user?._id);
-      navigate(`/appointments/${appointmentId}`); // Navigate to appointment details
+    console.log("Assessment skipped by user.");
+    // Optionally call skipAssessment service endpoint if backend logic requires it
+    // await assessmentService.skipAssessment(assessmentId, 'User skipped', req.user?._id);
+    
+    // Ensure appointmentId is a string before navigating
+    const safeAppointmentId = typeof appointmentId === 'object' && appointmentId !== null 
+      ? (appointmentId.toString ? appointmentId.toString() : String(appointmentId)) 
+      : String(appointmentId);
+      
+    navigate(`/appointments/${safeAppointmentId}`); // Navigate to appointment details
   };
 
   /**
@@ -170,7 +176,14 @@ const Assessment = () => {
               {/* {completedAssessment && <AssessmentReport assessment={completedAssessment} />} */}
               <Button 
                   variant="contained" 
-                  onClick={() => navigate(`/appointments/${appointmentId}`)} // Navigate back to appointment details
+                  onClick={() => {
+                    // Ensure appointmentId is a string before navigating
+                    const safeAppointmentId = typeof appointmentId === 'object' && appointmentId !== null 
+                      ? (appointmentId.toString ? appointmentId.toString() : String(appointmentId)) 
+                      : String(appointmentId);
+                      
+                    navigate(`/appointments/${safeAppointmentId}`); // Navigate back to appointment details
+                  }}
               >
                   View Appointment Details
               </Button>

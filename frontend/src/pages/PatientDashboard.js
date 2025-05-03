@@ -14,9 +14,10 @@ import {
   CircularProgress,
   Alert,
 } from '@mui/material';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link as RouterLink } from 'react-router-dom';
 import { format } from 'date-fns';
 import { appointmentService } from '../services/api';
+import { safeObjectId } from '../utils/stringUtils';
 
 const PatientDashboard = () => {
   const { user } = useAuth();
@@ -91,29 +92,57 @@ const PatientDashboard = () => {
               </Typography>
             ) : (
               <List>
-                {upcomingAppointments.slice(0, 3).map((appointment) => (
-                  <Box key={appointment._id}>
-                    <ListItem>
-                      <ListItemText
-                        primary={appointment.doctorName || `Dr. ${appointment.doctorUser?.firstName || 'Unknown'} ${appointment.doctorUser?.lastName || 'Doctor'}`}
-                        secondary={
-                          <>
-                            <Typography component="span" variant="body2" color="text.primary">
-                              {format(new Date(appointment.date), 'MMMM d, yyyy')} at {appointment.startTime}
-                            </Typography>
-                            <Typography variant="body2">
-                              Type: {appointment.type === 'virtual' ? 'Virtual Consultation' : 'In-Person Visit'}
-                            </Typography>
-                            <Typography variant="body2">
-                              Status: {appointment.status}
-                            </Typography>
-                          </>
-                        }
-                      />
-                    </ListItem>
-                    <Divider />
-                  </Box>
-                ))}
+                {upcomingAppointments.slice(0, 3).map((appointment, index) => {
+                  // Convert appointment ID to string to use as key
+                  const appointmentIdStr = safeObjectId(appointment._id);
+                  
+                  return (
+                    <Box key={appointmentIdStr || `appointment-${index}`}>
+                      <ListItem alignItems="flex-start">
+                        <ListItemText
+                          primary={appointment.doctorName || `Dr. ${appointment.doctorUser?.firstName || 'Unknown'} ${appointment.doctorUser?.lastName || 'Doctor'}`}
+                          secondary={
+                            <React.Fragment>
+                              <Typography component="span" variant="body2" color="text.primary">
+                                {format(new Date(appointment.date), 'MMMM d, yyyy')} at {appointment.startTime}
+                              </Typography>
+                              <Box component="div" sx={{ mt: 1 }}>
+                                <Typography component="span" variant="body2" display="block">
+                                  Type: {appointment.type === 'virtual' ? 'Virtual Consultation' : 'In-Person Visit'}
+                                </Typography>
+                                <Typography component="span" variant="body2" display="block">
+                                  Status: {appointment.status}
+                                </Typography>
+                              </Box>
+                              <Button 
+                                variant="outlined" 
+                                size="small" 
+                                component={RouterLink}
+                                to={`/appointments/${appointmentIdStr}`}
+                                onClick={() => {
+                                  // Store the ID in sessionStorage for reference in AppointmentDetails
+                                  const recentlyViewed = JSON.parse(sessionStorage.getItem('recentlyViewedAppointments') || '[]');
+                                  // Add this ID to the front of the array
+                                  const updatedViewed = [appointmentIdStr, ...recentlyViewed.filter(id => id !== appointmentIdStr)];
+                                  // Keep only the most recent 5
+                                  sessionStorage.setItem('recentlyViewedAppointments', JSON.stringify(updatedViewed.slice(0, 5)));
+                                  // Also store in localStorage as a fallback
+                                  localStorage.setItem('currentAppointmentId', appointmentIdStr);
+                                }}
+                                sx={{ mt: 1 }}
+                              >
+                                View Details
+                              </Button>
+                            </React.Fragment>
+                          }
+                        />
+                      </ListItem>
+                      {appointment !== upcomingAppointments[upcomingAppointments.length - 1] && (
+                        <Divider variant="inset" component="li" />
+                      )}
+                    </Box>
+                  );
+                })}
               </List>
             )}
             <Button
