@@ -45,31 +45,30 @@ const Home = () => {
 
   // Initiate Auth0 login/signup flow by redirecting to the backend endpoint
   const initiateAuth0Flow = () => {
-    const baseUrlString = process.env.REACT_APP_API_URL || window.location.origin;
-    let relativeAuthPath = '/api/auth/clinic/auth0/login'; // Path relative to API root
+    let auth0LoginUrl = '';
+    const apiBaseUrl = process.env.REACT_APP_API_URL;
+    const authPath = '/api/auth0/clinic/login';
 
-    try {
-      const baseUrl = new URL(baseUrlString);
-      
-      // Check if the base URL's pathname already contains the /api prefix.
-      // Examples:
-      // http://localhost:5000/api -> pathname is /api
-      // http://localhost:3000 -> pathname is /
-      if (baseUrl.pathname.startsWith('/api')) {
-        // If base URL is like '.../api', the path should be relative to that
-        relativeAuthPath = '/auth/clinic/auth0/login'; 
+    if (apiBaseUrl) {
+      // If REACT_APP_API_URL is set, construct the full URL
+      // ASSUMPTION: REACT_APP_API_URL is the base origin (e.g., http://localhost:5001)
+      // and does NOT include /api itself.
+      try {
+        // Ensure no double slashes between base and path
+        const url = new URL(authPath, apiBaseUrl);
+        auth0LoginUrl = url.toString();
+      } catch (e) {
+        console.error("Invalid REACT_APP_API_URL:", apiBaseUrl, e);
+        alert("API URL configuration error. Cannot initiate login.");
+        return;
       }
-      
-      // Construct the final URL ensuring no double slashes in path
-      const finalUrl = new URL(baseUrl.pathname.replace(/\/?$/, '') + relativeAuthPath, baseUrl.origin).toString();
-
-      console.log('Redirecting to Auth0 backend URL:', finalUrl);
-      window.location.href = finalUrl;
-
-    } catch (error) {
-      console.error('Error constructing backend URL:', error);
-      alert('Could not initiate login. Invalid API URL configuration.');
+    } else {
+      // If REACT_APP_API_URL is not set, assume API is relative to frontend origin
+      auth0LoginUrl = authPath;
     }
+
+    console.log('Redirecting to Auth0 backend URL:', auth0LoginUrl);
+    window.location.href = auth0LoginUrl;
   };
 
   // Both login and signup for the clinic portal now initiate the same Auth0 flow
