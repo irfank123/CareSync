@@ -11,62 +11,56 @@ export const AuthProvider = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // List of public routes that don't require authentication
+  const publicRoutes = ['/', '/login', '/register', '/forgot-password'];
+
   // Check for token expiration and refresh if needed
   useEffect(() => {
     const checkAuth = async () => {
-      setLoading(true);
       try {
         const token = localStorage.getItem('token');
         if (token) {
           // Check if token is expired
           const tokenData = JSON.parse(atob(token.split('.')[1]));
           const expirationTime = tokenData.exp * 1000; // Convert to milliseconds
-
-          let validToken = true;
+          
           if (expirationTime < Date.now()) {
             // Token expired, try to refresh
             try {
               await authService.refreshToken();
             } catch (error) {
-              console.error('Token refresh failed:', error);
-              // If refresh fails, clear local state and consider user logged out
-              validToken = false;
-              setUser(null);
-              localStorage.removeItem('token');
-              localStorage.removeItem('user');
+              // If refresh fails, logout
+              await authService.logout();
+              navigate('/login');
+              return;
             }
           }
-
-          // If token is still valid (or was refreshed), get user data
-          if (validToken) {
-            const storedUser = JSON.parse(localStorage.getItem('user'));
-            if (storedUser) {
-              setUser(storedUser);
-            } else {
-               // If token exists but no user data, maybe something went wrong
-               console.warn('Token found but no user data in localStorage.');
-               setUser(null); // Clear user state
-               localStorage.removeItem('token'); // Clear token
+          
+          // Get user data
+          const storedUser = JSON.parse(localStorage.getItem('user'));
+          if (storedUser) {
+            setUser(storedUser);
+            // Only redirect to dashboard if on a public route
+            if (publicRoutes.includes(location.pathname)) {
+              if (storedUser.role === 'doctor') {
+                navigate('/doctor-dashboard');
+              } else {
+                navigate('/dashboard');
+              }
             }
           }
-        } else {
-           // No token found, ensure user state is null
-           setUser(null);
         }
       } catch (error) {
-        // Catch errors during token parsing, localStorage access, etc.
         console.error('Auth check error:', error);
-        // Clear state on error
-        setUser(null);
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+        await authService.logout();
+        navigate('/login');
       } finally {
         setLoading(false);
       }
     };
 
     checkAuth();
-  }, []);
+  }, [navigate, location.pathname]);
 
   const login = async (credentials) => {
     try {
@@ -131,8 +125,6 @@ export const AuthProvider = ({ children }) => {
       setLoading(true);
       await authService.logout();
       setUser(null);
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
       toast.info('You have been logged out');
       navigate('/login');
     } catch (error) {
