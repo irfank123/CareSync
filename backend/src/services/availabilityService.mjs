@@ -52,11 +52,18 @@ class AvailabilityService {
    */
   async getAvailableTimeSlots(doctorId, startDate, endDate) {
     try {
+      console.log(`[service.getAvailableTimeSlots] Called with doctorId: ${doctorId}`);
+      
       // Default to current date if not provided
       const start = startDate || new Date();
       
       // Default to 7 days from start date if not provided
       const end = endDate || new Date(new Date(start).setDate(start.getDate() + 7));
+      
+      console.log(`[service.getAvailableTimeSlots] Date range: ${start.toISOString()} to ${end.toISOString()}`);
+      
+      // Log the query we're about to execute
+      console.log(`[service.getAvailableTimeSlots] Querying TimeSlot with filter: { doctorId: ${doctorId}, date range, status: 'available' }`);
       
       // Get existing time slots with status 'available'
       const timeSlots = await TimeSlot.find({
@@ -65,14 +72,30 @@ class AvailabilityService {
         status: 'available'
       }).sort({ date: 1, startTime: 1 }).lean();
       
+      console.log(`[service.getAvailableTimeSlots] Found ${timeSlots.length} available slots`);
+      
+      // Double check no booked slots are in the result
+      const bookedSlots = timeSlots.filter(slot => slot.status !== 'available');
+      if (bookedSlots.length > 0) {
+        console.error(`[service.getAvailableTimeSlots] WARNING: Found ${bookedSlots.length} non-available slots in the result!`);
+        console.error(`[service.getAvailableTimeSlots] First non-available slot: ${JSON.stringify(bookedSlots[0])}`);
+      }
+      
+      // If we found slots, log a sample
+      if (timeSlots.length > 0) {
+        console.log(`[service.getAvailableTimeSlots] First slot: ${JSON.stringify(timeSlots[0])}`);
+      }
+      
       // Ensure ObjectIds are properly serialized
-      return timeSlots.map(slot => ({
+      const serializedSlots = timeSlots.map(slot => ({
         ...slot,
         _id: slot._id.toString(),
         doctorId: slot.doctorId.toString()
       }));
+      
+      return serializedSlots;
     } catch (error) {
-      console.error('Get available time slots error:', error);
+      console.error('[service.getAvailableTimeSlots] Error:', error);
       throw new Error('Failed to retrieve available time slots');
     }
   }
@@ -323,7 +346,7 @@ class AvailabilityService {
     session.startTransaction();
     
     try {
-      // Get doctor and their availability schedule
+      // Get doctor
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         throw new Error('Doctor not found');
@@ -332,57 +355,70 @@ class AvailabilityService {
       // Default to current date if not provided
       const start = startDate || new Date();
       
-      // Default to 30 days from start date if not provided
-      const end = endDate || new Date(new Date(start).setDate(start.getDate() + 30));
-      
-      // Validate schedule exists
-      if (!doctor.availabilitySchedule || doctor.availabilitySchedule.length === 0) {
-        throw new Error('Doctor has no availability schedule defined');
-      }
+      // Default to the same day if endDate not provided
+      const end = endDate || new Date(start);
       
       const generatedSlots = [];
       
-      // Get appointment duration for the doctor (default to 30 minutes if not set)
-      const appointmentDuration = doctor.appointmentDuration || 30;
+      // Fixed appointment duration of 20 minutes
+      const appointmentDuration = 20;
       
       // Loop through each day in the date range
       for (let day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
         const currentDate = new Date(day);
-        const dayOfWeek = currentDate.getDay(); // 0-6 (Sunday-Saturday)
         
-        // Find the schedule for this day of week
-        const daySchedule = doctor.availabilitySchedule.find(
-          schedule => schedule.dayOfWeek === dayOfWeek && schedule.isAvailable
-        );
+        // Morning slots (9am to 12pm)
+        let slotStart = new Date(currentDate);
+        slotStart.setHours(9, 0, 0, 0);
         
-        // Skip if no schedule for this day or not available
-        if (!daySchedule) continue;
+        const morningEnd = new Date(currentDate);
+        morningEnd.setHours(12, 0, 0, 0);
         
-        // Check if this is a vacation day
-        const isVacationDay = doctor.vacationDays && doctor.vacationDays.some(
-          vacation => 
-            vacation.date.getFullYear() === currentDate.getFullYear() &&
-            vacation.date.getMonth() === currentDate.getMonth() &&
-            vacation.date.getDate() === currentDate.getDate() &&
-            !vacation.isWorkDay
-        );
+        // Generate morning slots (9am to 12pm)
+        while (slotStart.getTime() + appointmentDuration * 60000 <= morningEnd.getTime()) {
+          const slotEndTime = new Date(slotStart.getTime() + appointmentDuration * 60000);
+          
+          // Format times as HH:MM
+          const formattedStartTime = 
+            `${String(slotStart.getHours()).padStart(2, '0')}:${String(slotStart.getMinutes()).padStart(2, '0')}`;
+          
+          const formattedEndTime = 
+            `${String(slotEndTime.getHours()).padStart(2, '0')}:${String(slotEndTime.getMinutes()).padStart(2, '0')}`;
+          
+          // Check for existing overlapping slots
+          const overlappingSlot = await this.checkOverlappingTimeSlots(
+            doctorId,
+            new Date(currentDate),
+            formattedStartTime,
+            formattedEndTime
+          );
+          
+          // Only create slot if no overlap exists
+          if (!overlappingSlot) {
+            const newSlot = await TimeSlot.create([{
+              doctorId,
+              date: new Date(currentDate),
+              startTime: formattedStartTime,
+              endTime: formattedEndTime,
+              status: 'available'
+            }], { session });
+            
+            generatedSlots.push(newSlot[0]);
+          }
+          
+          // Move to next slot
+          slotStart.setTime(slotStart.getTime() + appointmentDuration * 60000);
+        }
         
-        // Skip if vacation day
-        if (isVacationDay) continue;
+        // Afternoon slots (1pm to 5pm)
+        slotStart = new Date(currentDate);
+        slotStart.setHours(13, 0, 0, 0);
         
-        // Parse start and end times
-        const [startHour, startMinute] = daySchedule.startTime.split(':').map(Number);
-        const [endHour, endMinute] = daySchedule.endTime.split(':').map(Number);
+        const afternoonEnd = new Date(currentDate);
+        afternoonEnd.setHours(17, 0, 0, 0);
         
-        // Set slot start and end times
-        const slotStart = new Date(currentDate);
-        slotStart.setHours(startHour, startMinute, 0, 0);
-        
-        const slotEnd = new Date(currentDate);
-        slotEnd.setHours(endHour, endMinute, 0, 0);
-        
-        // Generate slots while slot end time is before the end of day
-        while (slotStart.getTime() + appointmentDuration * 60000 <= slotEnd.getTime()) {
+        // Generate afternoon slots (1pm to 5pm)
+        while (slotStart.getTime() + appointmentDuration * 60000 <= afternoonEnd.getTime()) {
           const slotEndTime = new Date(slotStart.getTime() + appointmentDuration * 60000);
           
           // Format times as HH:MM
@@ -1212,6 +1248,154 @@ async syncWithGoogleCalendar(doctorId, refreshToken, startDate, endDate, userId)
   _timeToMinutes(timeString) {
     const [hours, minutes] = timeString.split(':').map(Number);
     return hours * 60 + minutes;
+  }
+
+  /**
+   * Generate standard time slots with fixed schedule (9am-12pm and 1pm-5pm)
+   * @param {string} doctorId - Doctor ID
+   * @param {Date} startDate - Start date
+   * @param {Date} endDate - End date
+   * @param {string} userId - User generating the slots
+   * @returns {Array} Generated time slots
+   */
+  async generateStandardTimeSlots(doctorId, startDate, endDate, userId) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    
+    try {
+      // Get doctor
+      const doctor = await Doctor.findById(doctorId);
+      if (!doctor) {
+        throw new Error('Doctor not found');
+      }
+      
+      // Default to current date if not provided
+      const start = startDate || new Date();
+      
+      // Default to the same day if endDate not provided
+      const end = endDate || new Date(start);
+      
+      const generatedSlots = [];
+      
+      // Fixed appointment duration of 20 minutes
+      const appointmentDuration = 20;
+      
+      // Loop through each day in the date range
+      for (let day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
+        const currentDate = new Date(day);
+        
+        // Morning slots (9am to 12pm)
+        let slotStart = new Date(currentDate);
+        slotStart.setHours(9, 0, 0, 0);
+        
+        const morningEnd = new Date(currentDate);
+        morningEnd.setHours(12, 0, 0, 0);
+        
+        // Generate morning slots (9am to 12pm)
+        while (slotStart.getTime() + appointmentDuration * 60000 <= morningEnd.getTime()) {
+          const slotEndTime = new Date(slotStart.getTime() + appointmentDuration * 60000);
+          
+          // Format times as HH:MM
+          const formattedStartTime = 
+            `${String(slotStart.getHours()).padStart(2, '0')}:${String(slotStart.getMinutes()).padStart(2, '0')}`;
+          
+          const formattedEndTime = 
+            `${String(slotEndTime.getHours()).padStart(2, '0')}:${String(slotEndTime.getMinutes()).padStart(2, '0')}`;
+          
+          // Check for existing overlapping slots
+          const overlappingSlot = await this.checkOverlappingTimeSlots(
+            doctorId,
+            new Date(currentDate),
+            formattedStartTime,
+            formattedEndTime
+          );
+          
+          // Only create slot if no overlap exists
+          if (!overlappingSlot) {
+            const newSlot = await TimeSlot.create([{
+              doctorId,
+              date: new Date(currentDate),
+              startTime: formattedStartTime,
+              endTime: formattedEndTime,
+              status: 'available'
+            }], { session });
+            
+            generatedSlots.push(newSlot[0]);
+          }
+          
+          // Move to next slot
+          slotStart.setTime(slotStart.getTime() + appointmentDuration * 60000);
+        }
+        
+        // Afternoon slots (1pm to 5pm)
+        slotStart = new Date(currentDate);
+        slotStart.setHours(13, 0, 0, 0);
+        
+        const afternoonEnd = new Date(currentDate);
+        afternoonEnd.setHours(17, 0, 0, 0);
+        
+        // Generate afternoon slots (1pm to 5pm)
+        while (slotStart.getTime() + appointmentDuration * 60000 <= afternoonEnd.getTime()) {
+          const slotEndTime = new Date(slotStart.getTime() + appointmentDuration * 60000);
+          
+          // Format times as HH:MM
+          const formattedStartTime = 
+            `${String(slotStart.getHours()).padStart(2, '0')}:${String(slotStart.getMinutes()).padStart(2, '0')}`;
+          
+          const formattedEndTime = 
+            `${String(slotEndTime.getHours()).padStart(2, '0')}:${String(slotEndTime.getMinutes()).padStart(2, '0')}`;
+          
+          // Check for existing overlapping slots
+          const overlappingSlot = await this.checkOverlappingTimeSlots(
+            doctorId,
+            new Date(currentDate),
+            formattedStartTime,
+            formattedEndTime
+          );
+          
+          // Only create slot if no overlap exists
+          if (!overlappingSlot) {
+            const newSlot = await TimeSlot.create([{
+              doctorId,
+              date: new Date(currentDate),
+              startTime: formattedStartTime,
+              endTime: formattedEndTime,
+              status: 'available'
+            }], { session });
+            
+            generatedSlots.push(newSlot[0]);
+          }
+          
+          // Move to next slot
+          slotStart.setTime(slotStart.getTime() + appointmentDuration * 60000);
+        }
+      }
+      
+      // Create audit log
+      await AuditLog.create([{
+        userId: userId || doctorId,
+        action: 'create',
+        resource: 'timeslot',
+        details: {
+          doctorId,
+          startDate: start,
+          endDate: end,
+          slotsGenerated: generatedSlots.length
+        }
+      }], { session });
+      
+      // Commit the transaction
+      await session.commitTransaction();
+      
+      return generatedSlots;
+    } catch (error) {
+      // Abort transaction on error
+      await session.abortTransaction();
+      console.error('Generate time slots error:', error);
+      throw new Error(`Failed to generate time slots: ${error.message}`);
+    } finally {
+      session.endSession();
+    }
   }
 }
 

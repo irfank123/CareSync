@@ -60,6 +60,8 @@ export const getAvailableTimeSlots = asyncHandler(async (req, res, next) => {
   const doctorIdentifier = req.params.doctorId;
   const { startDate, endDate } = req.query;
   
+  console.log(`[getAvailableTimeSlots] Request for doctor ${doctorIdentifier}, startDate: ${startDate}, endDate: ${endDate}`);
+  
   // Validate doctorId format for MongoDB ObjectId or assume it's a license number
   if (!doctorIdentifier || doctorIdentifier === '[object Object]' || doctorIdentifier === 'undefined') {
     return next(new AppError('Invalid doctor identifier format', 400));
@@ -78,16 +80,17 @@ export const getAvailableTimeSlots = asyncHandler(async (req, res, next) => {
       if (!doctorExists) {
         return next(new AppError('Doctor not found with the provided ID', 404));
       }
+      console.log(`[getAvailableTimeSlots] Using ObjectId ${actualDoctorId}`);
     } else {
       // If not a valid ObjectId, assume it's a license number
-      console.log(`Identifier ${doctorIdentifier} is not ObjectId, trying as licenseNumber`);
+      console.log(`[getAvailableTimeSlots] Identifier ${doctorIdentifier} is not ObjectId, trying as licenseNumber`);
       const doctor = await Doctor.findOne({ licenseNumber: doctorIdentifier });
       
       if (!doctor) {
         return next(new AppError('Doctor not found with the provided license number', 404));
       }
       actualDoctorId = doctor._id;
-      console.log(`Found doctor with ID ${actualDoctorId} using licenseNumber`);
+      console.log(`[getAvailableTimeSlots] Found doctor with ID ${actualDoctorId} using licenseNumber`);
     }
     
     // Parse dates if provided
@@ -99,8 +102,25 @@ export const getAvailableTimeSlots = asyncHandler(async (req, res, next) => {
       return next(new AppError('Invalid date format', 400));
     }
     
+    // Log the query parameters
+    console.log(`[getAvailableTimeSlots] Querying with doctorId: ${actualDoctorId}, start: ${start}, end: ${end}`);
+    
     // Call the service with the actual MongoDB ObjectId
     const timeSlots = await availabilityService.getAvailableTimeSlots(actualDoctorId, start, end);
+    
+    console.log(`[getAvailableTimeSlots] Found ${timeSlots.length} available slots`);
+    if (timeSlots.length > 0) {
+      console.log(`[getAvailableTimeSlots] Sample slot - ID: ${timeSlots[0]._id}, Status: ${timeSlots[0].status}, Date: ${timeSlots[0].date}, Time: ${timeSlots[0].startTime}-${timeSlots[0].endTime}`);
+    }
+    
+    // Generate cache keys to log - help diagnose caching issues
+    const cacheKey = `timeslots:available:${actualDoctorId}:${startDate || 'null'}:${endDate || 'null'}`;
+    console.log(`[getAvailableTimeSlots] Cache key would be: ${cacheKey}`);
+    
+    // Add a cache busting query parameter for the response
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Expires', '0');
+    res.set('Pragma', 'no-cache');
     
     res.status(200).json({
       success: true,
@@ -220,6 +240,11 @@ export const deleteTimeSlot = asyncHandler(async (req, res, next) => {
     return next(new AppError('Time slot not found', 404));
   }
   
+  // Check if the slot is booked
+  if (slot.status === 'booked') {
+    return next(new AppError('Cannot delete a booked time slot. Patients have already made appointments for this time.', 403));
+  }
+  
   // Modified permission check
   let canDeleteSlot = false;
   
@@ -239,12 +264,20 @@ export const deleteTimeSlot = asyncHandler(async (req, res, next) => {
     return next(new AppError('You are not authorized to delete this time slot', 403));
   }
   
-  await availabilityService.deleteTimeSlot(slotId, req.user._id);
-  
-  res.status(200).json({
-    success: true,
-    message: 'Time slot deleted successfully'
-  });
+  try {
+    await availabilityService.deleteTimeSlot(slotId, req.user._id);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Time slot deleted successfully'
+    });
+  } catch (error) {
+    // Handle specific errors
+    if (error.message.includes('booked time slot')) {
+      return next(new AppError('Cannot delete a booked time slot. Patients have already made appointments for this time.', 403));
+    }
+    return next(new AppError(`Failed to delete time slot: ${error.message}`, 500));
+  }
 });
 
 /**
@@ -314,7 +347,7 @@ export const generateTimeSlots = asyncHandler(async (req, res, next) => {
     return next(new AppError('You are not authorized to generate time slots for this doctor', 403));
   }
   
-  const timeSlots = await availabilityService.generateTimeSlotsFromSchedule(
+  const timeSlots = await availabilityService.generateStandardTimeSlots(
     doctorId, 
     start, 
     end, 

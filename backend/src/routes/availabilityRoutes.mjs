@@ -23,6 +23,15 @@ import {
 
 const router = express.Router();
 
+// Middleware to ensure no caching for available slots
+const noCacheMiddleware = (req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.set('Expires', '0');
+  res.set('Pragma', 'no-cache');
+  res.set('X-Cache-Disabled', 'true');
+  next();
+};
+
 // Public routes for viewing availability
 router.get(
   '/doctor/:doctorId/slots', 
@@ -33,8 +42,7 @@ router.get(
 
 router.get(
   '/doctor/:doctorId/slots/available', 
-  cacheMiddleware.cacheResponse(30), // Cache for 30 seconds
-  cacheMiddleware.setCacheHeaders({ isPublic: true, maxAge: 300 }), // 5 minutes for public caching
+  noCacheMiddleware, // Ensure no caching for available slots which change frequently
   getAvailableTimeSlots
 );
 

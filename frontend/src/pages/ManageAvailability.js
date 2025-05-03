@@ -15,6 +15,8 @@ import {
   CircularProgress,
   Menu,
   MenuItem,
+  DialogContentText,
+  Chip,
 } from '@mui/material';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -29,6 +31,7 @@ const ManageAvailability = () => {
   const [timeSlots, setTimeSlots] = useState([]);
   const [newSlot, setNewSlot] = useState({ start: null, end: null });
   const [openDialog, setOpenDialog] = useState(false);
+  const [generateConfirmOpen, setGenerateConfirmOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -287,6 +290,15 @@ const ManageAvailability = () => {
     setAnchorEl(null);
   };
 
+  const handleGenerateConfirmOpen = () => {
+    setGenerateConfirmOpen(true);
+    handleMenuClose();
+  };
+
+  const handleGenerateConfirmClose = () => {
+    setGenerateConfirmOpen(false);
+  };
+
   const handleGenerateSlots = async () => {
     if (!doctorId) {
       setError('Doctor ID not available');
@@ -297,7 +309,8 @@ const ManageAvailability = () => {
       setLoading(true);
       setError(null);
       const requestBody = {
-        date: format(selectedDate, 'yyyy-MM-dd'),
+        startDate: format(selectedDate, 'yyyy-MM-dd'),
+        endDate: format(selectedDate, 'yyyy-MM-dd'),
       };
 
       console.log('POST Request - Generate Slots:', {
@@ -320,13 +333,13 @@ const ManageAvailability = () => {
 
       const data = await response.json();
       setTimeSlots(data.data || []);
-      setSuccess('Time slots generated successfully');
+      setGenerateConfirmOpen(false);
+      setSuccess(`Successfully generated ${data.count} time slots`);
     } catch (err) {
       setError(err.message || 'Failed to generate time slots');
       console.error('Generate slots error:', err);
     } finally {
       setLoading(false);
-      handleMenuClose();
     }
   };
 
@@ -435,7 +448,7 @@ const ManageAvailability = () => {
                   open={Boolean(anchorEl)}
                   onClose={handleMenuClose}
                 >
-                  <MenuItem onClick={handleGenerateSlots}>Generate Slots</MenuItem>
+                  <MenuItem onClick={handleGenerateConfirmOpen}>Generate Slots</MenuItem>
                   <MenuItem onClick={() => handleGoogleCalendarAction('import')}>
                     Import from Google Calendar
                   </MenuItem>
@@ -466,14 +479,23 @@ const ManageAvailability = () => {
                         {format(parse(slot.startTime, 'HH:mm', new Date()), 'h:mm a')} -{' '}
                         {format(parse(slot.endTime, 'HH:mm', new Date()), 'h:mm a')}
                       </Typography>
-                      <Button
-                        size="small"
-                        color="error"
-                        onClick={() => handleDeleteSlot(slot._id)}
-                        sx={{ position: 'absolute', top: 8, right: 8 }}
-                      >
-                        Delete
-                      </Button>
+                      <Box sx={{ mt: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Chip 
+                          size="small"
+                          label={slot.status.charAt(0).toUpperCase() + slot.status.slice(1)}
+                          color={slot.status === 'available' ? 'success' : slot.status === 'booked' ? 'primary' : 'default'}
+                        />
+                        <Button
+                          size="small"
+                          color="error"
+                          onClick={() => handleDeleteSlot(slot._id)}
+                          sx={{ position: 'absolute', top: 8, right: 8 }}
+                          disabled={slot.status === 'booked'}
+                          title={slot.status === 'booked' ? "Cannot delete booked slots" : "Delete this slot"}
+                        >
+                          Delete
+                        </Button>
+                      </Box>
                     </Paper>
                   </Grid>
                 ))}
@@ -506,6 +528,34 @@ const ManageAvailability = () => {
           <Button onClick={handleCloseDialog}>Cancel</Button>
           <Button onClick={handleSaveSlot} variant="contained" disabled={loading}>
             {loading ? <CircularProgress size={24} /> : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={generateConfirmOpen}
+        onClose={handleGenerateConfirmClose}
+      >
+        <DialogTitle>Generate Time Slots</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This will generate 20-minute appointment slots for {format(selectedDate, 'MMMM d, yyyy')} with the following schedule:
+          </DialogContentText>
+          <Box sx={{ mt: 2, mb: 2 }}>
+            <ul>
+              <li>Morning: 9:00 AM - 12:00 PM</li>
+              <li>Lunch Break: 12:00 PM - 1:00 PM</li>
+              <li>Afternoon: 1:00 PM - 5:00 PM</li>
+            </ul>
+          </Box>
+          <DialogContentText>
+            Any existing overlapping slots will be preserved.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleGenerateConfirmClose}>Cancel</Button>
+          <Button onClick={handleGenerateSlots} color="primary">
+            Generate Slots
           </Button>
         </DialogActions>
       </Dialog>
