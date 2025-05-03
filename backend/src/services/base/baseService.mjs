@@ -173,10 +173,13 @@ class BaseService {
         .populate(this.options.populateFields)
         .lean();
       
-      // Explicit _id conversion before serialization
-      if (resource && resource._id && typeof resource._id.toString === 'function') {
-        console.log(`BaseService.getByField: Explicitly converting _id for resource found by ${field}=${value}`);
-        resource._id = resource._id.toString();
+      // Ensure _id is a string before returning
+      if (resource && resource._id) {
+        if (typeof resource._id.toString === 'function') {
+          resource._id = resource._id.toString();
+        } else {
+          resource._id = String(resource._id); // Fallback
+        }
       }
 
       return this._serializeIds(resource);

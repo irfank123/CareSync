@@ -12,6 +12,8 @@ import {
   Avatar,
 } from '@mui/material';
 import { useAuth } from '../../context/AuthContext';
+import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
+import MedicalNoteIcon from '@mui/icons-material/MedicalInformation';
 
 const Header = () => {
   const { user, isAuthenticated, logout } = useAuth();
@@ -51,12 +53,36 @@ const Header = () => {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           {isAuthenticated ? (
             <>
-              <Button color="inherit" component={RouterLink} to="/dashboard">
-                Dashboard
-              </Button>
-              <Button color="inherit" component={RouterLink} to="/appointments">
-                Appointments
-              </Button>
+              {user && (
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  {/* Navigation Links based on Role */}
+                  {user.role !== 'patient' && (
+                    <Button color="inherit" component={RouterLink} to="/dashboard">Dashboard</Button>
+                  )}
+                  {user.role === 'patient' && (
+                    <Button color="inherit" component={RouterLink} to="/my-dashboard">My Dashboard</Button>
+                  )}
+                  
+                  <Button color="inherit" component={RouterLink} to="/appointments">Appointments</Button>
+
+                  {/* Show Medical Records link for patients */} 
+                  {user.role === 'patient' && (
+                      <Button 
+                        color="inherit" 
+                        component={RouterLink} 
+                        to="/medical-records"
+                        startIcon={<MedicalNoteIcon />}
+                      >
+                        Medical Records
+                      </Button>
+                  )}
+
+                  {/* Show Patients link for admin, doctor, staff */} 
+                  {['admin', 'doctor', 'staff'].includes(user.role) && (
+                      <Button color="inherit" component={RouterLink} to="/patients">Patients</Button>
+                  )}
+                </Box>
+              )}
               <IconButton
                 size="large"
                 aria-label="account of current user"

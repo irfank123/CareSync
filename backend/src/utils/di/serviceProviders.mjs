@@ -15,6 +15,7 @@ import clinicAuthService from '../../services/clinicAuthService.mjs';
 import tokenBlacklistService from '../../services/tokenBlacklistService.mjs';
 import availabilityService from '../../services/availabilityService.mjs';
 import emailService from '../../services/emailService.mjs';
+import prescriptionService from '../../services/prescriptionService.mjs';
 
 /**
  * Core service provider with required services
@@ -109,6 +110,8 @@ class CoreServiceProvider {
     
     // Register appointment service last since it has many dependencies
     container.register('appointmentService', appointmentService);
+    
+    container.register('prescriptionService', prescriptionService);
       
     return container;
   }

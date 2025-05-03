@@ -16,12 +16,23 @@ const getPatients = async (req, res, next, { patientService }) => {
       return next(new AppError('You are not authorized to access patient records', 403));
     }
     
-    // Add clinic filtering for non-admin users
-    if (req.userRole !== 'admin' && req.clinicId) {
-      req.query.clinicId = req.clinicId;
+    const queryOptions = { ...req.query }; // Copy query params
+    
+    // Add clinic filtering for staff (non-admin, non-doctor)
+    if (req.userRole === 'staff' && req.clinicId) {
+      queryOptions.clinicId = req.clinicId;
     }
     
-    const result = await patientService.getAll(req.query);
+    // Add doctor filtering for doctors
+    if (req.userRole === 'doctor') {
+      // We need the Doctor document ID, not just the User ID.
+      // Assume middleware or a helper gets this. For now, pass the User ID.
+      // We'll need to adjust the service to handle this lookup.
+      queryOptions.filterByDoctorUserId = req.user._id;
+    }
+    
+    // Admin sees all (no extra filters applied here)
+    const result = await patientService.getAll(queryOptions);
     
     res.status(200).json({
       success: true,

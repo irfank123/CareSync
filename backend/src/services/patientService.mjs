@@ -1,7 +1,7 @@
 // src/services/patientService.mjs
 
 import BaseService from './base/baseService.mjs';
-import { Patient, User, AuditLog } from '../models/index.mjs';
+import { Patient, User, AuditLog, Appointment, Doctor } from '../models/index.mjs';
 import mongoose from 'mongoose';
 import { AppError } from '../utils/errorHandler.mjs';
 
@@ -40,14 +40,47 @@ class PatientService extends BaseService {
         gender,
         minAge,
         maxAge,
-        condition
+        condition,
+        filterByDoctorUserId
       } = options;
       
       const skip = (page - 1) * limit;
       
       // Build the aggregation pipeline
       const pipeline = [];
-      
+      let doctorRecordId = null;
+
+      // --- Conditional Doctor Filtering Logic --- 
+      if (filterByDoctorUserId) {
+          // 1. Find the Doctor record ID from the User ID
+          const doctorUser = await Doctor.findOne({ userId: filterByDoctorUserId }).select('_id').lean();
+          if (!doctorUser) {
+              console.warn(`Doctor filtering requested, but no Doctor record found for User ID: ${filterByDoctorUserId}`);
+              // Return empty result if doctor record not found for this user
+              return { data: [], total: 0, totalPages: 0, currentPage: 1 };
+          }
+          doctorRecordId = doctorUser._id;
+
+          // 2. Find all appointments for this doctor
+          const doctorAppointments = await Appointment.find({ doctorId: doctorRecordId }).select('patientId').lean();
+          
+          // 3. Extract unique patient IDs from those appointments
+          const patientIds = [...new Set(doctorAppointments.map(app => app.patientId?.toString()).filter(id => id))];
+
+          if (patientIds.length === 0) {
+              // If the doctor has no appointments, they have no associated patients via appointments
+              return { data: [], total: 0, totalPages: 0, currentPage: 1 };
+          }
+
+          // 4. Add a $match stage *early* in the pipeline to filter by these patient IDs
+          pipeline.push({
+              $match: {
+                  _id: { $in: patientIds.map(id => new mongoose.Types.ObjectId(id)) } // Match Patient._id
+              }
+          });
+      }
+      // --- End Conditional Doctor Filtering Logic ---
+
       // Stage 1: Join with User model to get user information
       pipeline.push({
         $lookup: {
@@ -69,8 +102,8 @@ class PatientService extends BaseService {
       // Stage 3: Match conditions
       const matchConditions = {};
       
-      // Filter by clinic if provided
-      if (clinicId) {
+      // Filter by clinic only if doctor filter was NOT applied and clinicId is provided
+      if (!filterByDoctorUserId && clinicId) { 
         matchConditions['user.clinicId'] = mongoose.Types.ObjectId(clinicId);
       }
       
@@ -131,7 +164,7 @@ class PatientService extends BaseService {
             { $limit: limit },
             {
               $project: {
-                _id: 1,
+                _id: { $toString: "$_id" },
                 userId: 1,
                 dateOfBirth: 1,
                 gender: 1,
@@ -143,17 +176,7 @@ class PatientService extends BaseService {
                 preferredCommunication: 1,
                 createdAt: 1,
                 updatedAt: 1,
-                'user._id': 1,
-                'user.firstName': 1,
-                'user.lastName': 1,
-                'user.email': 1,
-                'user.phoneNumber': 1,
-                'user.isActive': 1,
-                'user.role': 1,
-                'user.clinicId': 1,
-                'user.emailVerified': 1,
-                'user.lastLogin': 1,
-                'user.profileImageUrl': 1
+                user: "$user"
               }
             }
           ],
@@ -175,7 +198,9 @@ class PatientService extends BaseService {
         currentPage: parseInt(page, 10)
       };
     } catch (error) {
-      this._handleError(error, 'Failed to retrieve patients');
+      // Ensure specific error context is passed
+      const errorMessage = `Failed to retrieve patients${options.filterByDoctorUserId ? ' for doctor' : ''}`;
+      this._handleError(error, errorMessage);
     }
   }
   

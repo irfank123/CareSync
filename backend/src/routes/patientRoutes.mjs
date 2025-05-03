@@ -77,9 +77,10 @@ router.get(
       }
       
       console.log('Returning patient info for userId:', userId, 'patientId:', patient._id);
+      const plainPatient = patient.toObject();
       res.status(200).json({
         success: true,
-        data: patient
+        data: plainPatient // Send the plain object
       });
     } catch (err) {
       console.error('Error fetching patient by user ID:', err);

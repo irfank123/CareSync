@@ -15,8 +15,8 @@ const rateLimitMiddleware = {
    */
   createLimiter: (options = {}) => {
     const { 
-      windowMs = 15 * 60 * 1000, // 15 minutes
-      max = 100, // 100 requests per windowMs
+      windowMs = 5 * 60 * 1000, // 15 minutes
+      max = 1000000, // 100 requests per windowMs
       message = 'Too many requests, please try again later',
       standardHeaders = true,
       legacyHeaders = false,
@@ -58,8 +58,8 @@ const rateLimitMiddleware = {
    * API rate limiter
    */
   apiLimiter: rateLimit({
-    windowMs: config.security.rateLimit.windowMs || 15 * 60 * 1000, // 15 minutes
-    max: config.security.rateLimit.max || 100, // 100 requests per windowMs
+    windowMs: config.security.rateLimit.windowMs || 5 * 60 * 1000, // 15 minutes
+    max: config.security.rateLimit.max || 100000, // 100 requests per windowMs
     message: {
       success: false,
       message: 'Too many requests, please try again later'
@@ -73,7 +73,7 @@ const rateLimitMiddleware = {
    */
   authLimiter: rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
-    max: 30, // 30 requests per hour
+    max: 300, // 30 requests per hour
     message: {
       success: false,
       message: 'Too many authentication attempts, please try again later'
@@ -92,13 +92,13 @@ const rateLimitMiddleware = {
     const limits = {
       admin: 500,
       staff: 300,
-      doctor: 200,
-      patient: 100,
+      doctor: 20000,
+      patient: 100000,
       ...roleLimits
     };
     
     // Window size in milliseconds (15 minutes default)
-    const windowMs = 15 * 60 * 1000;
+    const windowMs = 5 * 60 * 1000;
     
     // Create rate limiters for each role
     const limiters = {};
@@ -121,7 +121,7 @@ const rateLimitMiddleware = {
     // Anonymous users limiter
     const anonymousLimiter = rateLimit({
       windowMs,
-      max: 50, // Lower limit for anonymous users
+      max: 1000, // Lower limit for anonymous users
       message: {
         success: false,
         message: 'Too many requests, please try again later'
@@ -155,14 +155,14 @@ const rateLimitMiddleware = {
   endpointLimiter: (endpointLimits = {}) => {
     // Default limits for common endpoints
     const limits = {
-      '/api/auth/': 20, // Authentication endpoints
-      '/api/users/': 100, // User management
-      '/api/appointments/': 150, // Appointments
+      '/api/auth/': 200, // Authentication endpoints
+      '/api/users/': 1000, // User management
+      '/api/appointments/': 10000, // Appointments
       ...endpointLimits
     };
     
     // Window size in milliseconds (15 minutes default)
-    const windowMs = 15 * 60 * 1000;
+    const windowMs = 5 * 60 * 1000;
     
     // Return middleware that applies limits based on URL path
     return (req, res, next) => {

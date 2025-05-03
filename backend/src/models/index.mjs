@@ -30,3 +30,8 @@ export const Prescription = PrescriptionModel;
 export const Notification = NotificationModel;
 export const AuditLog = AuditLogModel;
 export const SystemSettings = SystemSettingsModel;
+
+// Remove duplicate exports below
+// export { default as AuditLog } from './auditLogModel.mjs';
+// export { default as TimeSlot } from './timeSlotModel.mjs';
+// export { default as Notification } from './notificationModel.mjs';

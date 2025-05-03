@@ -16,11 +16,13 @@ import AppointmentDetails from './pages/AppointmentDetails';
 import ScheduleAppointment from './pages/ScheduleAppointment';
 import Doctors from './pages/Doctors';
 import Patients from './pages/Patients';
+import PatientDetails from './pages/PatientDetails';
 import Profile from './pages/Profile';
 import Settings from './pages/Settings';
 import ManageAvailability from './pages/ManageAvailability';
 import Assessment from './pages/Assessment';
 import NotFound from './pages/NotFound';
+import MedicalRecords from './pages/MedicalRecords';
 
 // Components
 import Header from './components/common/Header';
@@ -110,6 +112,14 @@ function App() {
                   } 
                 />
                 <Route 
+                  path="/patients/:id"
+                  element={
+                    <ProtectedRoute roles={['doctor', 'staff']}>
+                      <PatientDetails />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route 
                   path="/profile" 
                   element={
                     <ProtectedRoute>
@@ -132,6 +142,14 @@ function App() {
                       <ManageAvailability />
                     </ProtectedRoute>
                   } 
+                />
+                <Route 
+                  path="/medical-records"
+                  element={
+                    <ProtectedRoute roles={['patient']}>
+                      <MedicalRecords />
+                    </ProtectedRoute>
+                  }
                 />
                 <Route path="/test" element={<TestConnection />} />
                 <Route path="*" element={<NotFound />} />

@@ -207,6 +207,37 @@ export const appointmentService = {
   }
 };
 
+export const patientService = {
+  create: (patientData) => api.post('/patients', patientData),
+  getAll: () => api.get('/patients'),
+  getById: (id) => api.get(`/patients/${id}`),
+  getByUserId: (userId) => api.get(`/patients/user/${userId}`),
+  update: (id, patientData) => api.put(`/patients/${id}`, patientData),
+  delete: (id) => api.delete(`/patients/${id}`),
+  getAssessments: (patientId) => api.get(`/patients/${patientId}/assessments`),
+  getMedicalHistory: (id) => api.get(`/patients/${id}/medical-history`),
+};
+
+// Prescription Service
+export const prescriptionService = {
+  create: (prescriptionData) => api.post('/prescriptions', prescriptionData),
+  getByPatientId: (patientId) => api.get(`/prescriptions/patient/${patientId}`),
+  getById: (id) => api.get(`/prescriptions/${id}`),
+  update: (id, updateData) => api.put(`/prescriptions/${id}`, updateData),
+  getMyPrescriptions: async () => {
+    console.log("api.js: Calling getMyPrescriptions");
+    try {
+      const response = await api.get('/prescriptions/me');
+      console.log("api.js: getMyPrescriptions response received:", response);
+      return response; // Return the full response object
+    } catch (error) {
+      console.error("api.js: Error in getMyPrescriptions:", error.response || error);
+      throw error; // Re-throw to be caught by the component
+    }
+  },
+};
+
+// Add Doctor Service back
 export const doctorService = {
   getAll: () => api.get('/doctors'),
   getById: (id) => {
@@ -236,38 +267,6 @@ export const doctorService = {
       ? (id.toString ? id.toString() : String(id)) 
       : String(id);
     return api.put(`/doctors/${safeId}`, profileData);
-  },
-};
-
-export const patientService = {
-  getAll: () => api.get('/patients'),
-  getById: (id) => {
-    // Ensure ID is a string
-    const safeId = typeof id === 'object' && id !== null 
-      ? (id.toString ? id.toString() : String(id)) 
-      : String(id);
-    return api.get(`/patients/${safeId}`);
-  },
-  getByUserId: (userId) => {
-    // Ensure user ID is a string
-    const safeId = typeof userId === 'object' && userId !== null 
-      ? (userId.toString ? userId.toString() : String(userId)) 
-      : String(userId);
-    return api.get(`/patients/user/${safeId}`);
-  },
-  updateProfile: (id, profileData) => {
-    // Ensure ID is a string
-    const safeId = typeof id === 'object' && id !== null 
-      ? (id.toString ? id.toString() : String(id)) 
-      : String(id);
-    return api.put(`/patients/${safeId}`, profileData);
-  },
-  getMedicalHistory: (id) => {
-    // Ensure ID is a string
-    const safeId = typeof id === 'object' && id !== null 
-      ? (id.toString ? id.toString() : String(id)) 
-      : String(id);
-    return api.get(`/patients/${safeId}/medical-history`);
   },
 };
 

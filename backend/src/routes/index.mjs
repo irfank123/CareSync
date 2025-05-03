@@ -12,6 +12,9 @@ import appointmentRoutes from './appointmentRoutes.mjs';
 import availabilityRoutes from './availabilityRoutes.mjs';
 import testRoutes from './testRoutes.mjs';
 import assessmentRoutes from './assessmentRoutes.mjs';
+// import systemSettingsRoutes from './systemSettingsRoutes.mjs'; // Removed
+// import dashboardRoutes from './dashboardRoutes.mjs'; // Removed
+import prescriptionRoutes from './prescriptionRoutes.mjs';
 import { 
   errorMiddleware, 
   rateLimitMiddleware,
@@ -55,6 +58,9 @@ const setupRoutes = (app) => {
   
   // Appointment routes
   apiRouter.use('/appointments', appointmentRoutes);
+  
+  // Prescription routes
+  apiRouter.use('/prescriptions', prescriptionRoutes);
   
   // Availability routes
   apiRouter.use('/availability', availabilityRoutes);
