@@ -6,9 +6,12 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
 // Pages
-import Home from './pages/Home';
+import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ClinicLogin from './pages/ClinicLogin';
+import ClinicRegister from './pages/ClinicRegister';
+import ClinicDashboard from './pages/ClinicDashboard';
 import DoctorDashboard from './pages/DoctorDashboard';
 import PatientDashboard from './pages/PatientDashboard';
 import Appointments from './pages/Appointments';
@@ -21,6 +24,7 @@ import Settings from './pages/Settings';
 import ManageAvailability from './pages/ManageAvailability';
 import Assessment from './pages/Assessment';
 import NotFound from './pages/NotFound';
+import Auth0Callback from './pages/Auth0Callback';
 
 // Components
 import Header from './components/common/Header';
@@ -42,9 +46,28 @@ function App() {
             <Header />
             <main style={{ minHeight: 'calc(100vh - 64px - 100px)', padding: '20px' }}>
               <Routes>
-                <Route path="/" element={<Home />} />
+                <Route path="/" element={<Landing />} />
+                
+                {/* Patient/Doctor Authentication Routes */}
                 <Route path="/login" element={<Login />} />
                 <Route path="/register" element={<Register />} />
+                
+                {/* Clinic Authentication Routes */}
+                <Route path="/clinic/login" element={<ClinicLogin />} />
+                <Route path="/clinic/register" element={<ClinicRegister />} />
+                <Route 
+                  path="/clinic/dashboard" 
+                  element={
+                    <ProtectedRoute>
+                      <ClinicDashboard />
+                    </ProtectedRoute>
+                  } 
+                />
+                
+                {/* Auth0 Callback */}
+                <Route path="/callback" element={<Auth0Callback />} />
+                
+                {/* Protected Routes */}
                 <Route 
                   path="/dashboard" 
                   element={

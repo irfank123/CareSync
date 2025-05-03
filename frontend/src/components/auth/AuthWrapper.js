@@ -21,7 +21,7 @@ const AuthWrapper = ({ children }) => {
   }
 
   // List of public routes that don't require authentication
-  const publicRoutes = ['/', '/login', '/register', '/forgot-password'];
+  const publicRoutes = ['/', '/login', '/register', '/forgot-password', '/clinic/login', '/clinic/register'];
 
   // If the user is not authenticated and trying to access a protected route
   if (!isAuthenticated && !publicRoutes.includes(location.pathname)) {

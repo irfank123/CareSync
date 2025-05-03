@@ -147,6 +147,112 @@ export const authService = {
   }
 };
 
+// Clinic Auth service methods
+export const clinicAuthService = {
+  login: async (credentials) => {
+    try {
+      const loginData = {
+        email: credentials.email,
+        password: credentials.password
+      };
+      
+      console.log('Clinic login request being sent:', {
+        email: loginData.email,
+        password: 'REDACTED'
+      });
+      
+      const response = await api.post('/auth/clinic/login', loginData);
+      console.log('Clinic login response received:', response.data);
+      
+      if (response.data.token) {
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('clinic', JSON.stringify(response.data.clinic));
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
+      
+      return {
+        success: true,
+        clinic: response.data.clinic,
+        user: response.data.user
+      };
+    } catch (error) {
+      console.error('Clinic login error:', error.response?.data || error.message);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Login failed. Please try again.'
+      };
+    }
+  },
+
+  register: async (clinicData) => {
+    try {
+      console.log('Clinic registration request being sent:', {
+        ...clinicData,
+        password: 'REDACTED'
+      });
+      
+      const response = await api.post('/auth/clinic/register', {
+        name: clinicData.clinicName,
+        email: clinicData.email,
+        password: clinicData.password,
+        adminFirstName: 'Admin', // Default values that can be updated later
+        adminLastName: 'User',
+        phoneNumber: clinicData.phone,
+        address: clinicData.address,
+        licenseNumber: clinicData.licenseNumber,
+        taxId: clinicData.taxId
+      });
+      
+      console.log('Clinic registration response received:', response.data);
+      
+      if (response.data.token) {
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('clinic', JSON.stringify(response.data.clinic));
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
+      
+      return {
+        success: true,
+        clinic: response.data.clinic,
+        user: response.data.user
+      };
+    } catch (error) {
+      console.error('Clinic registration error:', error.response?.data || error.message);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Registration failed. Please try again.'
+      };
+    }
+  },
+
+  getProfile: async () => {
+    try {
+      const response = await api.get('/auth/clinic/me');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  verifyEmail: async (email, code) => {
+    try {
+      const response = await api.post('/auth/clinic/verify-email', { email, code });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  submitVerification: async (documents) => {
+    try {
+      const response = await api.post('/auth/clinic/submit-verification', { documents });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+};
+
 export const appointmentService = {
   create: (appointmentData) => api.post('/appointments', appointmentData),
   getAll: () => api.get('/appointments'),
