@@ -44,7 +44,7 @@ const auth0Service = {
       audience: auth0Config.audience,
       connection: 'Username-Password-Authentication', // Default database connection
       screen_hint: 'login',
-      organization: process.env.REACT_APP_AUTH0_CLINIC_ORG_ID, // Use specific organization for clinics
+      organization: process.env.REACT_APP_AUTH0_CLINIC_ORG_ID // Use specific organization for clinics
     });
     
     // Save the fact that we're authenticating a clinic
