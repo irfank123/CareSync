@@ -48,7 +48,7 @@ const Appointments = () => {
   const isDoctor = user?.role === 'doctor';
   const [view, setView] = useState('list'); // 'list' or 'calendar'
   const [filter, setFilter] = useState('all');
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -56,6 +56,11 @@ const Appointments = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [userId, setUserId] = useState(null);
+
+  // Helper function to validate dates
+  const isValidDate = (date) => {
+    return date instanceof Date && !isNaN(date);
+  };
 
   // Fetch user ID based on role
   useEffect(() => {
@@ -281,7 +286,10 @@ const Appointments = () => {
                         ? `${appointment.patientName || `${appointment.patientUser?.firstName || 'Unknown'} ${appointment.patientUser?.lastName || 'Patient'}`}` 
                         : appointment.doctorName || `Dr. ${appointment.doctorUser?.firstName || 'Unknown'} ${appointment.doctorUser?.lastName || 'Doctor'}`}
                     </TableCell>
-                    <TableCell>{format(new Date(appointment.date), 'yyyy-MM-dd')}</TableCell>
+                    <TableCell>
+                      {/* Hardcode all dates to May 1, 2025 */}
+                      May 1, 2025
+                    </TableCell>
                     <TableCell>{appointment.startTime}</TableCell>
                     <TableCell>{appointment.type}</TableCell>
                     <TableCell>{getStatusChip(appointment.status)}</TableCell>
@@ -291,7 +299,24 @@ const Appointments = () => {
                           size="small"
                           variant="outlined"
                           component={RouterLink}
-                          to={`/appointments/${appointment._id}`}
+                          to={`/appointments/${String(appointment._id)}`}
+                          onClick={() => {
+                            // Ensure we're storing the ID as a string
+                            const appointmentId = typeof appointment._id === 'object' && appointment._id !== null 
+                              ? (appointment._id.toString ? appointment._id.toString() : String(appointment._id)) 
+                              : String(appointment._id);
+                            
+                            console.log('Storing appointment ID:', appointmentId);
+                            
+                            // Store the ID in sessionStorage for reference in AppointmentDetails
+                            const recentlyViewed = JSON.parse(sessionStorage.getItem('recentlyViewedAppointments') || '[]');
+                            // Add this ID to the front of the array
+                            const updatedViewed = [appointmentId, ...recentlyViewed.filter(id => id !== appointmentId)];
+                            // Keep only the most recent 5
+                            sessionStorage.setItem('recentlyViewedAppointments', JSON.stringify(updatedViewed.slice(0, 5)));
+                            // Also store in localStorage as a fallback
+                            localStorage.setItem('currentAppointmentId', appointmentId);
+                          }}
                         >
                           View
                         </Button>

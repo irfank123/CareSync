@@ -164,23 +164,21 @@ const AssessmentReport = ({ assessment }) => {
       </Box>
 
       {/* Generated Questions and Patient Answers */}
-      {assessment.generatedQuestions && assessment.generatedQuestions.length > 0 && (
+      {assessment.responses && assessment.responses.length > 0 && (
         <Box sx={{ mt: 4 }}>
           <Typography variant="h6" gutterBottom>
             Assessment Q&A
           </Typography>
           <List>
-            {assessment.generatedQuestions.map((question, index) => {
-              // Find the corresponding response using questionId
-              const response = assessment.responses?.find(r => r.questionId === question.questionId);
-              const answerText = response ? 
+            {assessment.responses.map((response, index) => {
+              const answerText = response.answer !== null && response.answer !== undefined ? 
                                   (typeof response.answer === 'boolean' ? (response.answer ? 'Yes' : 'No') : String(response.answer)) 
-                                  : '-'; // Display '-' if no answer found
+                                  : '-';
 
               return (
-                <Paper key={question.questionId || index} variant="outlined" sx={{ mb: 2, p: 2 }}>
+                <Paper key={response.questionId || index} variant="outlined" sx={{ mb: 2, p: 2 }}>
                   <Typography variant="subtitle1" gutterBottom>
-                    Q: {question.question}
+                    Q: {response.question}
                   </Typography>
                   <Typography variant="body1" color="text.secondary">
                     A: {answerText}

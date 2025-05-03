@@ -1,83 +1,77 @@
-import { axiosInstance } from './api';
+import axios from 'axios';
+import { API_BASE_URL } from '../config';
 
-/**
- * Service for handling assessment-related API calls
- */
-const assessmentService = {
-  /**
-   * Start a new assessment and get initial questions.
-   * Assumes authentication provides necessary context (like patientId if user is patient).
-   * @param {string} appointmentId - Appointment ID assessment is linked to.
-   * @param {Array} symptoms - Array of symptom descriptions.
-   * @returns {Promise<Object>} { assessmentId: string, questions: Array }
-   */
-  startAssessment: (appointmentId, symptoms) => {
-    // Route changed to /api/assessments/start
-    return axiosInstance.post(`/assessments/start`, {
-      appointmentId,
-      symptoms
-      // patientId might be inferred from auth on backend if needed
-    });
-  },
-
-  /**
-   * Submit answers for an assessment and trigger report generation.
-   * @param {string} assessmentId - The ID of the assessment being answered.
-   * @param {Array} answers - Array of answer objects { questionId: string, answer: any }.
-   * @returns {Promise<Object>} Completed assessment data.
-   */
-  submitAnswers: (assessmentId, answers) => {
-    // Route changed to /api/assessments/:id/responses
-    return axiosInstance.post(`/assessments/${assessmentId}/responses`, {
-      answers
-    });
-  },
-  
-  /**
-   * Get a specific assessment by its ID.
-   * @param {string} assessmentId - Assessment ID.
-   * @returns {Promise<Object>} Assessment data.
-   */
-  getAssessment: (assessmentId) => {
-    // Route changed to /api/assessments/:id
-    return axiosInstance.get(`/assessments/${assessmentId}`);
-  },
-
-  /**
-   * Get all assessments for a specific patient.
-   * @param {string} patientId - Patient ID.
-   * @param {Object} params - Query parameters (page, limit, sort, order).
-   * @returns {Promise<Object>} Assessment list and pagination data.
-   */
-  getPatientAssessments: (patientId, params = {}) => {
-    // Route changed to /api/assessments?patientId=...
-    return axiosInstance.get(`/assessments`, { params: { ...params, patientId } });
-  },
-
-  /**
-   * Skip an assessment.
-   * @param {string} assessmentId - Assessment ID.
-   * @param {string} reason - Reason for skipping.
-   * @returns {Promise<Object>} Skipped assessment data.
-   */
-  skipAssessment: (assessmentId, reason) => {
-    // Route changed to /api/assessments/:id/skip
-    return axiosInstance.post(`/assessments/${assessmentId}/skip`, {
-      reason
-    });
-  },
-
-  /**
-   * Get assessment for a specific appointment.
-   * @param {string} appointmentId - Appointment ID.
-   * @returns {Promise<Object>} Assessment data.
-   */
-  getAssessmentByAppointment: (appointmentId) => {
-    // Route changed slightly
-    return axiosInstance.get(`/assessments/by-appointment/${appointmentId}`);
+// Get all assessments
+export const getAllAssessments = async (params = {}) => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/assessments`, { params });
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching assessments:', error);
+    throw error;
   }
-
-  // Removed obsolete methods: getQuestions, saveResponses, completeAssessment
 };
 
-export default assessmentService; 
+// Get assessments for a specific patient
+export const getPatientAssessments = async (patientId, params = {}) => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/patients/${patientId}/assessments`, { params });
+    return response.data;
+  } catch (error) {
+    console.error(`Error fetching assessments for patient ${patientId}:`, error);
+    throw error;
+  }
+};
+
+// Get a specific assessment by ID
+export const getAssessmentById = async (assessmentId) => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/assessments/${assessmentId}`);
+    return response.data;
+  } catch (error) {
+    console.error(`Error fetching assessment with ID ${assessmentId}:`, error);
+    throw error;
+  }
+};
+
+// Create a new assessment
+export const createAssessment = async (assessmentData) => {
+  try {
+    const response = await axios.post(`${API_BASE_URL}/assessments`, assessmentData);
+    return response.data;
+  } catch (error) {
+    console.error('Error creating assessment:', error);
+    throw error;
+  }
+};
+
+// Update an existing assessment
+export const updateAssessment = async (assessmentId, assessmentData) => {
+  try {
+    const response = await axios.put(`${API_BASE_URL}/assessments/${assessmentId}`, assessmentData);
+    return response.data;
+  } catch (error) {
+    console.error(`Error updating assessment with ID ${assessmentId}:`, error);
+    throw error;
+  }
+};
+
+// Delete an assessment
+export const deleteAssessment = async (assessmentId) => {
+  try {
+    const response = await axios.delete(`${API_BASE_URL}/assessments/${assessmentId}`);
+    return response.data;
+  } catch (error) {
+    console.error(`Error deleting assessment with ID ${assessmentId}:`, error);
+    throw error;
+  }
+};
+
+export default {
+  getAllAssessments,
+  getPatientAssessments,
+  getAssessmentById,
+  createAssessment,
+  updateAssessment,
+  deleteAssessment
+}; 

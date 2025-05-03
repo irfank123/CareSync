@@ -572,7 +572,9 @@ const ScheduleAppointment = () => {
       setLoading(true);
       setError('');
       
-      // Save the answers
+      console.log('Received answers from QuestionForm:', submittedAnswers);
+      
+      // Save the answers to state
       setAnswers(submittedAnswers);
       
       // Make API call to submit answers (similar to Assessment.js)
@@ -601,9 +603,56 @@ const ScheduleAppointment = () => {
     }
   };
 
+  /**
+   * Prepare assessment with questions and answers for backend submission
+   * This ensures all responses have both questionId and question
+   */
+  const prepareAssessmentData = () => {
+    console.log('Preparing assessment data with:', { 
+      questions, 
+      answers, 
+      assessment
+    });
+    
+    const formattedAssessment = {...assessment};
+    
+    // If we completed the AI assessment questionnaire
+    if (questions && questions.length > 0) {
+      console.log(`Found ${questions.length} questions to process`);
+      
+      // Include the questions in the assessment for reference
+      formattedAssessment.generatedQuestions = questions;
+      
+      // Format responses to include both questionId, question text, and answer
+      if (answers && answers.length > 0) {
+        console.log(`Found ${answers.length} answers to process`);
+        
+        // If we have an array of answer objects from QuestionForm submission
+        formattedAssessment.responses = answers.map(answerObj => {
+          return {
+            questionId: answerObj.questionId,
+            question: questions.find(q => q.questionId === answerObj.questionId)?.question || `Question ${answerObj.questionId}`,
+            answer: answerObj.answer
+          };
+        });
+      } else {
+        // No answers found in the expected format
+        console.log('No answers found in expected format, generating empty responses array');
+        formattedAssessment.responses = [];
+      }
+    } else {
+      console.log('No questions found, cannot generate properly formatted responses');
+      formattedAssessment.responses = [];
+    }
+    
+    console.log('Formatted assessment:', formattedAssessment);
+    return formattedAssessment;
+  };
+
   const handleSubmit = async () => {
     try {
       setLoading(true);
+      setError(null);
       
       // First, get patient ID for current user
       const patientResponse = await fetch(`${API_BASE_URL}/patients/me`, {
@@ -615,38 +664,31 @@ const ScheduleAppointment = () => {
       }
       
       const patientData = await patientResponse.json();
-      console.log('Raw patientData.data:', patientData.data);
-      console.log('Raw patientData.data._id type:', typeof patientData.data?._id);
-      if (patientData.data?._id && typeof patientData.data._id === 'object') {
-        console.log('Raw patientData.data._id keys:', Object.keys(patientData.data._id));
-        console.log('Raw patientData.data._id JSON:', JSON.stringify(patientData.data._id));
-      }
-
-      // Correctly extract patientId from the response data
+      console.log('Patient data retrieved:', patientData);
+      
+      // Extract patientId from the response data
       const patientId = extractObjectId(patientData.data);
       
       if (!patientId) {
         throw new Error('Failed to extract valid patient ID');
       }
-      console.log('Extracted patientId:', patientId);
+      console.log('Using patientId:', patientId);
       
-      // Extract ObjectIds using stored rawId
-      let doctorId = selectedDoctor.rawId;
-      let timeSlotId = selectedTimeSlot.rawId;
+      // Extract the required IDs (accounting for different object formats)
+      let doctorId = selectedDoctor?.rawId || (typeof selectedDoctor?._id === 'string' ? selectedDoctor._id : null);
+      let timeSlotId = selectedTimeSlot?._id || null;
       
-      // Ensure IDs are strings
-      if (doctorId && typeof doctorId !== 'string') {
-        console.warn('Doctor ID is not a string:', doctorId);
-        if (selectedDoctor.licenseNumber) {
-          doctorId = selectedDoctor.licenseNumber;
-          console.log('Converting doctor ID to string using license number:', doctorId);
-        } else {
-          throw new Error('Invalid doctor ID format - not a string');
-        }
+      // Convert to string if required
+      if (doctorId && typeof doctorId === 'object') {
+        doctorId = extractObjectId(doctorId);
       }
       
-      if (timeSlotId && typeof timeSlotId !== 'string') {
-        console.warn('Time slot ID is not a string:', timeSlotId);
+      if (timeSlotId && typeof timeSlotId === 'object') {
+        timeSlotId = extractObjectId(timeSlotId);
+      }
+      
+      // Construct timeSlotId from date and time if it wasn't properly extracted
+      if (!timeSlotId && selectedTimeSlot) {
         const slotDate = format(new Date(selectedTimeSlot.date), 'yyyy-MM-dd');
         timeSlotId = `${slotDate}-${selectedTimeSlot.startTime}-${selectedTimeSlot.endTime}`;
         console.log('Converting time slot ID to string using date and time:', timeSlotId);
@@ -669,6 +711,11 @@ const ScheduleAppointment = () => {
         }
       };
 
+      const formattedAssessment = prepareAssessmentData();
+      
+      console.log('Questions before submission:', questions);
+      console.log('Answers before submission:', answers);
+      
       const appointmentData = {
         patientId: patientId,
         doctorId: doctorId,
@@ -678,15 +725,19 @@ const ScheduleAppointment = () => {
         endTime: selectedTimeSlot.endTime,
         type: appointmentType,
         status: 'scheduled', // Default status
-        // Include assessment data in the payload
         reasonForVisit: assessment.symptoms, // Use primary symptom as reason
         additionalNotes: assessment.additionalNotes,
-        // We might need to add severity/duration if backend expects it directly
-        // For now, only include reason and notes
         isVirtual: appointmentType === 'virtual',
+        // Include the assessment data properly structured for the backend
+        assessment: {
+          symptoms: assessment.symptoms,
+          generatedQuestions: formattedAssessment.generatedQuestions || questions || [],
+          responses: formattedAssessment.responses || [],
+          severity: mapSeverity(assessment.severity)
+        }
       };
       
-      console.log('Submitting appointment data:', appointmentData);
+      console.log('Final appointment data to submit:', appointmentData);
       
       // Make API call to create appointment
       const appointmentResponse = await fetch(`${API_BASE_URL}/appointments`, {

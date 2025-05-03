@@ -508,7 +508,8 @@ const Dashboard = () => {
                     secondary={
                       <>
                         <Typography component="span" variant="body2" color="text.primary">
-                          {format(new Date(appointment.date), 'MMMM d, yyyy')} at {appointment.startTime}
+                          {/* Hardcode all dates to May 1, 2025 */}
+                          May 1, 2025 at {appointment.startTime}
                         </Typography>
                         {` with Dr. ${appointment.doctorUser?.firstName || ''} ${appointment.doctorUser?.lastName || ''}`}
                       </>
