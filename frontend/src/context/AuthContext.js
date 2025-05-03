@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { authService } from '../services/api';
+import auth0Service from '../services/auth0Service';
 
 const AuthContext = createContext(null);
 
@@ -172,6 +173,48 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('user', JSON.stringify({ ...user, ...updatedData }));
   };
 
+  // Add the function to handle the Auth0 callback
+  const handleAuthCallback = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code');
+      const error = params.get('error');
+
+      if (error) {
+        throw new Error(params.get('error_description') || 'Error during Auth0 callback');
+      }
+
+      if (!code) {
+        throw new Error('No authorization code found in callback URL.');
+      }
+
+      // Exchange the code using the auth0Service
+      const result = await auth0Service.handleAuth0Callback(code);
+
+      if (result.success && result.data.user) {
+        setUser(result.data.user);
+        // User and token are already stored in localStorage by auth0Service
+        toast.success('Authentication successful!');
+        // Navigation will be handled by the Auth0Callback component itself
+        return { success: true }; 
+      } else {
+        throw new Error(result.error || 'Failed to process authentication callback.');
+      }
+    } catch (error) {
+      console.error('handleAuthCallback error:', error);
+      toast.error(error.message || 'Authentication failed during callback.');
+      setUser(null); // Ensure user is logged out
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      localStorage.removeItem('clinic');
+      navigate('/login'); // Redirect to login on failure
+      return { success: false, error: error.message };
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const value = {
     user,
     loading,
@@ -181,6 +224,7 @@ export const AuthProvider = ({ children }) => {
     verifyMfa,
     updateUserProfile,
     isAuthenticated: !!user,
+    handleAuthCallback, // Add handleAuthCallback to the context value
   };
 
   return (
