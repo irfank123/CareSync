@@ -21,16 +21,19 @@ import Settings from './pages/Settings';
 import ManageAvailability from './pages/ManageAvailability';
 import Assessment from './pages/Assessment';
 import NotFound from './pages/NotFound';
+import ClinicDashboard from './pages/ClinicDashboard';
+import AuthError from './pages/AuthError';
 
 // Components
 import Header from './components/common/Header';
 import Footer from './components/common/Footer';
-import AuthWrapper from './components/auth/AuthWrapper';
 import ProtectedRoute from './components/auth/ProtectedRoute';
+import ProtectedClinicRoute from './components/auth/ProtectedClinicRoute';
 import TestConnection from './components/TestConnection';
 
 // Context
 import { AuthProvider } from './context/AuthContext';
+import { ClinicAuthProvider } from './context/ClinicAuthContext';
 
 function App() {
   return (
@@ -38,108 +41,117 @@ function App() {
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <AuthProvider>
-          <AuthWrapper>
-            <Header />
-            <main style={{ minHeight: 'calc(100vh - 64px - 100px)', padding: '20px' }}>
-              <Routes>
-                <Route path="/" element={<Home />} />
-                <Route path="/login" element={<Login />} />
-                <Route path="/register" element={<Register />} />
-                <Route 
-                  path="/dashboard" 
-                  element={
-                    <ProtectedRoute roles={['patient']}>
-                      <PatientDashboard />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/doctor-dashboard" 
-                  element={
-                    <ProtectedRoute roles={['doctor']}>
-                      <DoctorDashboard />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/appointments" 
-                  element={
-                    <ProtectedRoute roles={['doctor', 'patient']}>
-                      <Appointments />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/appointments/schedule" 
-                  element={
-                    <ProtectedRoute roles={['patient']}>
-                      <ScheduleAppointment />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/appointments/:id" 
-                  element={
-                    <ProtectedRoute roles={['doctor', 'patient']}>
-                      <AppointmentDetails />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/assessment/:patientId/:appointmentId" 
-                  element={
-                    <ProtectedRoute roles={['patient']}>
-                      <Assessment />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/doctors" 
-                  element={
-                    <ProtectedRoute roles={['patient', 'staff']}>
-                      <Doctors />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/patients" 
-                  element={
-                    <ProtectedRoute roles={['doctor', 'staff']}>
-                      <Patients />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/profile" 
-                  element={
-                    <ProtectedRoute>
-                      <Profile />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/settings" 
-                  element={
-                    <ProtectedRoute>
-                      <Settings />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route 
-                  path="/manage-availability" 
-                  element={
-                    <ProtectedRoute roles={['doctor']}>
-                      <ManageAvailability />
-                    </ProtectedRoute>
-                  } 
-                />
-                <Route path="/test" element={<TestConnection />} />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </main>
-            <Footer />
-            <ToastContainer position="bottom-right" />
-          </AuthWrapper>
+          <ClinicAuthProvider>
+              <Header />
+              <main style={{ minHeight: 'calc(100vh - 64px - 100px)', padding: '20px' }}>
+                <Routes>
+                  <Route path="/" element={<Home />} />
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/register" element={<Register />} />
+                  <Route 
+                    path="/dashboard" 
+                    element={
+                      <ProtectedRoute roles={['patient']}>
+                        <PatientDashboard />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/doctor-dashboard" 
+                    element={
+                      <ProtectedRoute roles={['doctor']}>
+                        <DoctorDashboard />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/appointments" 
+                    element={
+                      <ProtectedRoute roles={['doctor', 'patient']}>
+                        <Appointments />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/appointments/schedule" 
+                    element={
+                      <ProtectedRoute roles={['patient']}>
+                        <ScheduleAppointment />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/appointments/:id" 
+                    element={
+                      <ProtectedRoute roles={['doctor', 'patient']}>
+                        <AppointmentDetails />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/assessment/:patientId/:appointmentId" 
+                    element={
+                      <ProtectedRoute roles={['patient']}>
+                        <Assessment />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/doctors" 
+                    element={
+                      <ProtectedRoute roles={['patient', 'staff']}>
+                        <Doctors />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/patients" 
+                    element={
+                      <ProtectedRoute roles={['doctor', 'staff']}>
+                        <Patients />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/profile" 
+                    element={
+                      <ProtectedRoute>
+                        <Profile />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/settings" 
+                    element={
+                      <ProtectedRoute>
+                        <Settings />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/manage-availability" 
+                    element={
+                      <ProtectedRoute roles={['doctor']}>
+                        <ManageAvailability />
+                      </ProtectedRoute>
+                    } 
+                  />
+                  <Route path="/test" element={<TestConnection />} />
+                  <Route 
+                    path="/clinic-dashboard" 
+                    element={
+                      <ProtectedClinicRoute>
+                        <ClinicDashboard />
+                      </ProtectedClinicRoute>
+                    } 
+                  />
+                  <Route path="/auth/error" element={<AuthError />} />
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </main>
+              <Footer />
+              <ToastContainer position="bottom-right" />
+          </ClinicAuthProvider>
         </AuthProvider>
       </ThemeProvider>
     </Router>
