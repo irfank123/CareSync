@@ -230,7 +230,7 @@ const auditMiddleware = {
             auditMiddleware.createAuditLog({
               userId,
               action,
-              resource: 'authentication',
+              resource: 'user',
               details: {
                 ip: req.ip,
                 userAgent: req.headers['user-agent']

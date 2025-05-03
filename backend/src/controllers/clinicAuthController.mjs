@@ -3,6 +3,7 @@
 import { check, validationResult } from 'express-validator';
 import { withServices, withServicesForController } from '../utils/controllerHelper.mjs';
 import { formatValidationErrors } from '../utils/errorHandler.mjs';
+import config from '../config/config.mjs'; // Import config for frontend URL
 
 /**
  * @desc    Register new clinic
@@ -361,6 +362,66 @@ const refreshTokenClinic = async (req, res, next, { clinicAuthService }) => {
   }
 };
 
+/**
+ * @desc    Initiate Auth0 login/signup flow for clinic users
+ * @route   GET /api/auth/clinic/auth0/login
+ * @access  Public
+ */
+const initiateClinicAuth0Login = async (req, res, next, { clinicAuth0Service }) => {
+  try {
+    const authorizationUrl = clinicAuth0Service.getAuthorizationUrl();
+    res.redirect(authorizationUrl);
+  } catch (error) {
+    console.error('Auth0 login initiation error:', error);
+    // Redirect to a frontend error page or show a generic error
+    // For now, send a 500 status
+    res.status(500).json({ success: false, message: error.message || 'Server error initiating Auth0 login' });
+  }
+};
+
+/**
+ * @desc    Handle callback from Auth0 after authentication
+ * @route   GET /api/auth/clinic/auth0/callback
+ * @access  Public
+ */
+const handleClinicAuth0Callback = async (req, res, next, { clinicAuth0Service }) => {
+  const { code, error, error_description } = req.query;
+
+  if (error) {
+    console.error('Auth0 callback error:', error, error_description);
+    // Redirect to a frontend error page with error info
+    return res.redirect(`${config.frontendUrl}/auth/error?message=${encodeURIComponent(error_description || error)}`);
+  }
+
+  if (!code) {
+    console.error('Auth0 callback missing code.');
+    return res.redirect(`${config.frontendUrl}/auth/error?message=Authorization code missing`);
+  }
+
+  try {
+    const { user, clinic, token } = await clinicAuth0Service.handleCallback(code);
+
+    // Set cookie with the local JWT token
+    const options = {
+      expires: new Date(Date.now() + config.jwt.cookieOptions.maxAge),
+      httpOnly: config.jwt.cookieOptions.httpOnly,
+      secure: config.jwt.cookieOptions.secure,
+    };
+
+    res.cookie('token', token, options);
+
+    // Redirect to the frontend
+    // Decision: Redirect to a generic clinic dashboard or a specific setup page?
+    // Let's redirect to a placeholder /clinic-dashboard for now.
+    res.redirect(`${config.frontendUrl}/clinic-dashboard`); // TODO: Define this route in frontend
+
+  } catch (error) {
+    console.error('Auth0 callback processing error:', error);
+    // Redirect to a frontend error page
+    res.redirect(`${config.frontendUrl}/auth/error?message=${encodeURIComponent(error.message || 'Login failed' )}`);
+  }
+};
+
 // Controller methods object
 const clinicAuthController = {
   registerClinic,
@@ -371,7 +432,9 @@ const clinicAuthController = {
   forgotPassword,
   resetPasswordClinic,
   updatePasswordClinic,
-  refreshTokenClinic
+  refreshTokenClinic,
+  initiateClinicAuth0Login,
+  handleClinicAuth0Callback
 };
 
 // Service dependencies for each method
@@ -384,7 +447,9 @@ const dependencies = {
   forgotPassword: ['clinicAuthService'],
   resetPasswordClinic: ['clinicAuthService'],
   updatePasswordClinic: ['clinicAuthService'],
-  refreshTokenClinic: ['clinicAuthService']
+  refreshTokenClinic: ['clinicAuthService'],
+  initiateClinicAuth0Login: ['clinicAuth0Service'],
+  handleClinicAuth0Callback: ['clinicAuth0Service'] // Assumes clinicAuth0Service handles user/clinic finding
 };
 
 // Apply DI to the controller
@@ -468,7 +533,9 @@ export const {
   forgotPassword: forgotPasswordWithDI,
   resetPasswordClinic: resetPasswordClinicWithDI,
   updatePasswordClinic: updatePasswordClinicWithDI,
-  refreshTokenClinic: refreshTokenClinicWithDI
+  refreshTokenClinic: refreshTokenClinicWithDI,
+  initiateClinicAuth0Login: initiateClinicAuth0LoginWithDI,
+  handleClinicAuth0Callback: handleClinicAuth0CallbackWithDI
 } = enhancedController;
 
 // Default export for compatibility
@@ -482,6 +549,8 @@ export default {
   resetPasswordClinic: resetPasswordClinicWithDI,
   updatePasswordClinic: updatePasswordClinicWithDI,
   refreshTokenClinic: refreshTokenClinicWithDI,
+  initiateClinicAuth0Login: initiateClinicAuth0LoginWithDI,
+  handleClinicAuth0Callback: handleClinicAuth0CallbackWithDI,
   registerClinicValidation,
   loginClinicValidation,
   verifyEmailValidation,

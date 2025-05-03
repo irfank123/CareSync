@@ -3,6 +3,13 @@
 import mongoose from 'mongoose';
 import config from './config/config.mjs';
 import { bootstrap } from './app.mjs';
+import clinicAuthService from './services/clinicAuthService.mjs';
+import clinicAuth0Service from './services/clinicAuth0Service.mjs';
+import clinicService from './services/clinicService.mjs';
+import clinicRoutes from './routes/clinicRoutes.mjs';
+import authRoutes from './routes/authRoutes.mjs';
+import clinicAuthRoutes from './routes/clinicAuthRoutes.mjs';
+import AppServiceProvider from './utils/di/serviceProviders.mjs';
 
 /**
  * Connect to MongoDB with retry logic
@@ -127,13 +134,41 @@ const startApp = async () => {
     // Connect to database
     await connectDB();
     
-    // Bootstrap the application
+    // Bootstrap the application (sets up core middleware)
     const app = await bootstrap();
+    
+    // --- Initialize services via Service Provider ---
+    // This step ensures all services are registered and async ones are ready.
+    await AppServiceProvider.initializeAsync(); 
+    // --- Remove Manual Service Instantiation and Attachment ---
+    /* 
+    // Instantiate services (REMOVED - Handled by DI Container)
+    const services = {
+      clinicAuthService,
+      clinicAuth0Service,
+      clinicService,
+    };
+
+    // Middleware to attach services to req (REMOVED - Handled by DI Helper)
+    app.use((req, res, next) => {
+      req.services = services;
+      next();
+    });
+    */
+
+    // --- Mount Routers ---
+    app.use('/api/auth', authRoutes);
+    app.use('/api/auth/clinic', clinicAuthRoutes);
+    app.use('/api/clinics', clinicRoutes);
+    // TODO: Mount other resource routers
+
+    // --- Global Error Handler --- 
+    // app.use(globalErrorHandler); 
     
     // Start server
     const server = startServer(app);
     
-    // Setup error handlers
+    // Setup process error handlers
     setupErrorHandlers(server);
     
     return server;
@@ -142,7 +177,6 @@ const startApp = async () => {
     process.exit(1);
   }
 };
-
 
 startApp();
 
