@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   Box,
   Container,
@@ -9,8 +9,11 @@ import {
   Card,
   CardContent,
   CardMedia,
+  CardActions,
+  CircularProgress,
 } from '@mui/material';
 import { useAuth } from '../context/AuthContext';
+import { useClinicAuth } from '../context/ClinicAuthContext';
 
 const features = [
   {
@@ -36,7 +39,49 @@ const features = [
 ];
 
 const Home = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated: isClientAuthenticated, user: clientUser } = useAuth();
+  const { isClinicAuthenticated, loading: clinicLoading } = useClinicAuth();
+  const navigate = useNavigate();
+
+  // Initiate Auth0 login/signup flow by redirecting to the backend endpoint
+  const initiateAuth0Flow = () => {
+    const baseUrlString = process.env.REACT_APP_API_URL || window.location.origin;
+    let relativeAuthPath = '/api/auth/clinic/auth0/login'; // Path relative to API root
+
+    try {
+      const baseUrl = new URL(baseUrlString);
+      
+      // Check if the base URL's pathname already contains the /api prefix.
+      // Examples:
+      // http://localhost:5000/api -> pathname is /api
+      // http://localhost:3000 -> pathname is /
+      if (baseUrl.pathname.startsWith('/api')) {
+        // If base URL is like '.../api', the path should be relative to that
+        relativeAuthPath = '/auth/clinic/auth0/login'; 
+      }
+      
+      // Construct the final URL ensuring no double slashes in path
+      const finalUrl = new URL(baseUrl.pathname.replace(/\/?$/, '') + relativeAuthPath, baseUrl.origin).toString();
+
+      console.log('Redirecting to Auth0 backend URL:', finalUrl);
+      window.location.href = finalUrl;
+
+    } catch (error) {
+      console.error('Error constructing backend URL:', error);
+      alert('Could not initiate login. Invalid API URL configuration.');
+    }
+  };
+
+  // Both login and signup for the clinic portal now initiate the same Auth0 flow
+  const handleClinicLogin = () => {
+    console.log('Initiating Clinic Auth0 Login...');
+    initiateAuth0Flow();
+  };
+
+  const handleClinicSignUp = () => {
+    console.log('Initiating Clinic Auth0 Sign Up...');
+    initiateAuth0Flow();
+  };
 
   return (
     <Box>
@@ -57,29 +102,6 @@ const Home = () => {
               <Typography variant="h5" gutterBottom>
                 Your all-in-one healthcare management platform
               </Typography>
-              <Box sx={{ mt: 4 }}>
-                {isAuthenticated ? (
-                  <Button
-                    variant="contained"
-                    color="secondary"
-                    size="large"
-                    component={RouterLink}
-                    to="/dashboard"
-                  >
-                    Go to Dashboard
-                  </Button>
-                ) : (
-                  <Button
-                    variant="contained"
-                    color="secondary"
-                    size="large"
-                    component={RouterLink}
-                    to="/register"
-                  >
-                    Get Started
-                  </Button>
-                )}
-              </Box>
             </Grid>
             <Grid item xs={12} md={6}>
               <Box
@@ -90,10 +112,83 @@ const Home = () => {
                   width: '100%',
                   maxWidth: 500,
                   height: 'auto',
+                  display: { xs: 'none', md: 'block' }
                 }}
               />
             </Grid>
           </Grid>
+
+          <Box sx={{ mt: 6 }}>
+            <Typography variant="h4" component="h2" align="center" gutterBottom sx={{ mb: 4 }}>
+              Access Your Portal
+            </Typography>
+            <Grid container spacing={4} justifyContent="center">
+              <Grid item xs={12} sm={6} md={5}>
+                <Card sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  <CardContent sx={{ flexGrow: 1 }}>
+                    <Typography variant="h5" component="div" gutterBottom>
+                      Client Portal
+                    </Typography>
+                    <Typography variant="body1" color="text.secondary">
+                      For Patients and Doctors. Access your appointments, records, and manage your healthcare journey.
+                    </Typography>
+                  </CardContent>
+                  <CardActions sx={{ justifyContent: 'center', pb: 2 }}>
+                    {isClientAuthenticated && (clientUser?.role === 'patient' || clientUser?.role === 'doctor') ? (
+                      <Button
+                        variant="contained"
+                        color="secondary"
+                        onClick={() => navigate(clientUser.role === 'doctor' ? '/doctor-dashboard' : '/dashboard')}
+                      >
+                        Go to Dashboard
+                      </Button>
+                    ) : (
+                      <>
+                        <Button variant="contained" color="secondary" component={RouterLink} to="/login" disabled={isClinicAuthenticated}>
+                          Login
+                        </Button>
+                        <Button variant="outlined" color="secondary" component={RouterLink} to="/register" sx={{ ml: 1 }} disabled={isClinicAuthenticated}>
+                          Sign Up
+                        </Button>
+                      </>
+                    )}
+                  </CardActions>
+                </Card>
+              </Grid>
+
+              <Grid item xs={12} sm={6} md={5}>
+                <Card sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  <CardContent sx={{ flexGrow: 1 }}>
+                    <Typography variant="h5" component="div" gutterBottom>
+                      Clinic Portal
+                    </Typography>
+                    <Typography variant="body1" color="text.secondary">
+                      For Clinic Administrators. Manage clinic operations, staff, and integrations. (Auth0 Login)
+                    </Typography>
+                  </CardContent>
+                  <CardActions sx={{ justifyContent: 'center', pb: 2 }}>
+                    {clinicLoading ? (
+                      <CircularProgress size={24} /> 
+                    ) : isClinicAuthenticated ? (
+                      <Button 
+                        variant="contained" 
+                        color="secondary"
+                        onClick={() => navigate('/clinic-dashboard')}
+                      >
+                        Go to Clinic Dashboard
+                      </Button>
+                    ) : (
+                      <>
+                        <Button variant="contained" color="secondary" onClick={handleClinicLogin} disabled={isClientAuthenticated}>
+                          Login / Sign Up
+                        </Button>
+                      </>
+                    )}
+                  </CardActions>
+                </Card>
+              </Grid>
+            </Grid>
+          </Box>
         </Container>
       </Box>
 

@@ -16,6 +16,8 @@ import tokenBlacklistService from '../../services/tokenBlacklistService.mjs';
 import availabilityService from '../../services/availabilityService.mjs';
 import emailService from '../../services/emailService.mjs';
 import prescriptionService from '../../services/prescriptionService.mjs';
+import clinicAuth0Service from '../../services/clinicAuth0Service.mjs';
+import clinicService from '../../services/clinicService.mjs';
 
 /**
  * Core service provider with required services
@@ -95,6 +97,7 @@ class CoreServiceProvider {
     container.register('patientService', patientService);
     container.register('doctorService', doctorService); 
     container.register('staffService', staffService);
+    container.register('clinicService', clinicService);
     
     // Auth services with dependencies
     // Create auth service through factory function to avoid circular dependencies
@@ -104,6 +107,7 @@ class CoreServiceProvider {
     
     // Pass emailService to clinicAuthService - should update implementation to match authService pattern
     container.register('clinicAuthService', clinicAuthService);
+    container.register('clinicAuth0Service', clinicAuth0Service);
     
     // Services that depend on multiple other services
     container.register('availabilityService', availabilityService);

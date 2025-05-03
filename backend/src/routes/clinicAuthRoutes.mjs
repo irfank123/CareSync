@@ -16,7 +16,9 @@ import {
   verifyEmailValidation,
   forgotPasswordClinicValidation,
   resetPasswordClinicValidation,
-  updatePasswordClinicValidation
+  updatePasswordClinicValidation,
+  initiateClinicAuth0LoginWithDI,
+  handleClinicAuth0CallbackWithDI
 } from '../controllers/clinicAuthController.mjs';
 import { 
   authMiddleware, 
@@ -62,8 +64,28 @@ router.put(
   resetPasswordClinicWithDI
 );
 
+// --- New Auth0 Routes ---
+
+// Route to initiate Auth0 login/signup for clinics
+router.get(
+  '/auth0/login',
+  // No specific validation needed here, redirects to Auth0
+  // Consider adding specific rate limiting if needed
+  auditMiddleware.logAuth('clinic-auth0-initiate'), 
+  initiateClinicAuth0LoginWithDI
+);
+
+// Route for Auth0 callback
+router.get(
+  '/auth0/callback',
+  // No specific validation needed here, handles Auth0 response
+  auditMiddleware.logAuth('clinic-auth0-callback'), 
+  handleClinicAuth0CallbackWithDI
+);
+
 // Protected routes
 router.use(authMiddleware.authenticate); // All routes below this line require authentication
+router.use(authMiddleware.checkClinicStatus); // Ensure clinic status is checked
 
 router.get(
   '/me',

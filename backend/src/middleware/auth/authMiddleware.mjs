@@ -562,7 +562,36 @@ const authMiddleware = {
    */
   protect: async (req, res, next) => {
     return authMiddleware.authenticate(req, res, next);
-  }
+  },
+
+  /**
+   * Middleware to authorize users who can create a clinic.
+   * Requires user to be authenticated, have role \'admin\', and not have a clinicId yet.
+   */
+  authorizeClinicAdminCreation: (req, res, next) => {
+    // Assumes `authenticate` middleware has already run and set req.user
+    if (!req.user) {
+      // Should not happen if authenticate ran first, but check anyway
+      return res.status(401).json({ success: false, message: 'Not authenticated' });
+    }
+
+    const { role, clinicId } = req.user;
+
+    if (role === 'admin' && !clinicId) {
+      // User is an admin and does not belong to a clinic yet - authorized
+      next();
+    } else {
+      // User is not an admin or already belongs to a clinic
+      let message = 'Not authorized to create a clinic.';
+      if (role !== 'admin') {
+        message = 'Only users with the admin role can create clinics.';
+      }
+      if (clinicId) {
+        message = 'You already belong to a clinic and cannot create another one.';
+      }
+      res.status(403).json({ success: false, message });
+    }
+  },
 };
 
 export default authMiddleware;
