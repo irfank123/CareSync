@@ -287,8 +287,7 @@ const Appointments = () => {
                         : appointment.doctorName || `Dr. ${appointment.doctorUser?.firstName || 'Unknown'} ${appointment.doctorUser?.lastName || 'Doctor'}`}
                     </TableCell>
                     <TableCell>
-                      {/* Hardcode all dates to May 1, 2025 */}
-                      May 1, 2025
+                      {appointment.date ? new Date(appointment.date).toLocaleDateString() : 'No date'}
                     </TableCell>
                     <TableCell>{appointment.startTime}</TableCell>
                     <TableCell>{appointment.type}</TableCell>

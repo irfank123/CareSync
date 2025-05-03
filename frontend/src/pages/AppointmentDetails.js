@@ -459,99 +459,47 @@ const AppointmentDetails = () => {
     // Log the input for debugging purposes
     console.log('formatDateFromISO input:', dateInput, 'type:', typeof dateInput);
     
-    // Temporarily hardcode the date to May 1, 2025
-    return "May 1, 2025";
+    if (!dateInput) {
+      return getDateFromTimesOrToday();
+    }
     
-    // Original implementation commented out
-    /*
     try {
-      if (!dateInput) {
-        console.log('formatDateFromISO: No date input provided');
-        return getDateFromTimesOrToday(); // Use our new helper function
-      }
-      
-      console.log('formatDateFromISO input:', dateInput, 'type:', typeof dateInput);
-      
-      // If it's already a formatted string in the format we want, return it directly
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/; // YYYY-MM-DD
-      if (typeof dateInput === 'string' && dateRegex.test(dateInput)) {
-        console.log('formatDateFromISO: Input matches YYYY-MM-DD format');
-        // Parse it to ensure it's valid, then reformat
-        const dateParts = dateInput.split('-');
-        const year = parseInt(dateParts[0]);
-        const month = parseInt(dateParts[1]) - 1; // JavaScript months are 0-indexed
-        const day = parseInt(dateParts[2]);
-        
-        const date = new Date(year, month, day);
+      // If it's a string, try to parse it as a date
+      if (typeof dateInput === 'string') {
+        const date = new Date(dateInput);
         if (!isNaN(date.getTime())) {
-          const formatted = format(date, 'MMMM dd, yyyy');
-          console.log('formatDateFromISO: Successfully formatted string date:', formatted);
-          return formatted;
+          return date.toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          });
         }
       }
       
-      // If it's an object with date properties from MongoDB
-      if (typeof dateInput === 'object' && dateInput !== null) {
-        // Handle MongoDB date object format which might have properties like _bsontype
-        if (dateInput._bsontype === 'Date' && typeof dateInput.toISOString === 'function') {
-          const isoString = dateInput.toISOString();
-          console.log('formatDateFromISO: Converted MongoDB date to ISO string:', isoString);
-          const date = new Date(isoString);
-          if (!isNaN(date.getTime())) {
-            const formatted = format(date, 'MMMM dd, yyyy');
-            console.log('formatDateFromISO: Successfully formatted MongoDB date:', formatted);
-            return formatted;
-          }
-        }
-        
-        // Handle empty object
-        if (Object.keys(dateInput).length === 0) {
-          console.log('formatDateFromISO: Date is an empty object');
-          return 'Date not available';
-        }
-        
-        // If it has a toDate method (MongoDB date)
-        if (typeof dateInput.toDate === 'function') {
-          const jsDate = dateInput.toDate();
-          console.log('formatDateFromISO: Converted using toDate():', jsDate);
-          if (jsDate instanceof Date && !isNaN(jsDate.getTime())) {
-            const formatted = format(jsDate, 'MMMM dd, yyyy');
-            console.log('formatDateFromISO: Successfully formatted using toDate:', formatted);
-            return formatted;
-          }
-        }
-        
-        // Try as a JavaScript Date object
-        if (dateInput instanceof Date) {
-          console.log('formatDateFromISO: Input is a Date object');
-          if (!isNaN(dateInput.getTime())) {
-            const formatted = format(dateInput, 'MMMM dd, yyyy');
-            console.log('formatDateFromISO: Successfully formatted Date object:', formatted);
-            return formatted;
-          }
-          console.log('formatDateFromISO: Date object is invalid');
-          return 'Invalid date';
-        }
+      // If it's already a Date object
+      if (dateInput instanceof Date && !isNaN(dateInput.getTime())) {
+        return dateInput.toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
       }
       
-      // For any other valid date input, parse and format
-      console.log('formatDateFromISO: Trying to parse as generic date');
+      // For any other case, try to convert to a Date object
       const date = new Date(dateInput);
-      console.log('formatDateFromISO: Parsed result:', date);
-      
-      if (isNaN(date.getTime())) {
-        console.log('formatDateFromISO: Generic parsing failed - invalid date');
-        return 'Invalid date';
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
       }
       
-      const formattedDate = format(date, 'MMMM dd, yyyy');
-      console.log('formatDateFromISO: Successfully formatted as generic date:', formattedDate);
-      return formattedDate;
+      return 'Date not available';
     } catch (error) {
-      console.error('formatDateFromISO error:', error);
+      console.error('Error formatting date:', error);
       return 'Error formatting date';
     }
-    */
   };
 
   const getStatusChip = (status) => {
@@ -855,36 +803,9 @@ const AppointmentDetails = () => {
                     </Typography>
                     <Typography>
                       {(() => {
-                        // For now, always return the hardcoded date regardless of input
-                        return formatDateFromISO(null);
-                        
-                        /* Original implementation:
                         // Directly use appointment date if available
                         if (appointment?.date) {
-                          console.log('Using appointment date directly:', appointment.date, typeof appointment.date);
-                          
-                          // If it's a string, use it directly with formatDateFromISO
-                          if (typeof appointment.date === 'string') {
-                            return formatDateFromISO(appointment.date);
-                          }
-                          
-                          // If it's an object (could be a Date object or empty object)
-                          if (typeof appointment.date === 'object') {
-                            // Handle empty object
-                            if (Object.keys(appointment.date).length === 0) {
-                              return getDateFromTimesOrToday();
-                            }
-                            
-                            // Try to format as Date object
-                            try {
-                              const date = new Date(appointment.date);
-                              if (!isNaN(date.getTime())) {
-                                return format(date, 'MMMM dd, yyyy');
-                              }
-                            } catch (e) {
-                              console.error('Error formatting appointment date:', e);
-                            }
-                          }
+                          return formatDateFromISO(appointment.date);
                         }
                         
                         // Fallback to timeslot date
@@ -893,7 +814,6 @@ const AppointmentDetails = () => {
                         }
                         
                         return getDateFromTimesOrToday();
-                        */
                       })()}
                     </Typography>
                   </Box>

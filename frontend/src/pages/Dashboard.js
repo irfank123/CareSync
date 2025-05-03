@@ -508,8 +508,7 @@ const Dashboard = () => {
                     secondary={
                       <>
                         <Typography component="span" variant="body2" color="text.primary">
-                          {/* Hardcode all dates to May 1, 2025 */}
-                          May 1, 2025 at {appointment.startTime}
+                          {appointment.date ? new Date(appointment.date).toLocaleDateString() : 'No date'} at {appointment.startTime}
                         </Typography>
                         {` with Dr. ${appointment.doctorUser?.firstName || ''} ${appointment.doctorUser?.lastName || ''}`}
                       </>
