@@ -1,11 +1,40 @@
-import React from 'react';
-import { Container, Typography, Paper, Box, Button, CircularProgress, Alert } from '@mui/material';
-import { useClinicAuth } from '../context/ClinicAuthContext'; // Import the hook
-import CreateClinicForm from '../components/clinic/CreateClinicForm'; // Import the form
+import React, { useEffect, useState } from 'react';
+import { Container, Typography, Paper, Box, Button, CircularProgress, Alert, Snackbar } from '@mui/material';
+import { useLocation } from 'react-router-dom';
+import { useClinicAuth } from '../context/ClinicAuthContext';
+import CreateClinicForm from '../components/clinic/CreateClinicForm';
+import Cookies from 'js-cookie';
 
 const ClinicDashboard = () => {
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const authSuccess = queryParams.get('auth') === 'success';
+  
+  const [showSuccess, setShowSuccess] = useState(authSuccess);
+  const [cookieDebug, setCookieDebug] = useState('');
+  
   // Get clinic user details and actions from context
-  const { clinicUser, clinicInfo, loading, logoutClinic, isClinicAuthenticated } = useClinicAuth(); 
+  const { 
+    clinicUser, 
+    clinicInfo, 
+    loading, 
+    logoutClinic, 
+    isClinicAuthenticated, 
+    authError,
+    fetchClinicProfile
+  } = useClinicAuth();
+
+  useEffect(() => {
+    // When auth=success is in the URL, try to fetch profile
+    if (authSuccess) {
+      const token = Cookies.get('token');
+      const debug = Cookies.get('auth_debug');
+      setCookieDebug(`Token: ${token ? 'present' : 'missing'}, Debug: ${debug || 'missing'}`);
+      
+      // This will refresh the clinic user data
+      fetchClinicProfile();
+    }
+  }, [authSuccess, fetchClinicProfile]);
 
   if (loading) {
     return (
@@ -20,13 +49,24 @@ const ClinicDashboard = () => {
     // but as a fallback:
     return (
       <Container component="main" maxWidth="sm">
-        <Alert severity="error" sx={{ mt: 4 }}>You are not authorized to view this page. Please log in.</Alert>
+        <Alert severity="error" sx={{ mt: 4 }}>
+          You are not authorized to view this page. Please log in.
+          {authError && <Typography sx={{ mt: 1 }}>Error: {authError}</Typography>}
+          {cookieDebug && <Typography variant="caption" sx={{ mt: 1, display: 'block' }}>Debug: {cookieDebug}</Typography>}
+        </Alert>
       </Container>
     );
   }
 
   return (
     <Container component="main" maxWidth="lg">
+      <Snackbar 
+        open={showSuccess} 
+        autoHideDuration={6000} 
+        onClose={() => setShowSuccess(false)}
+        message="Authentication successful!"
+      />
+      
       <Box sx={{ mt: 4 }}>
         <Paper elevation={3} sx={{ p: 4 }}>
           <Typography variant="h4" component="h1" gutterBottom>

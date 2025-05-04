@@ -5,15 +5,23 @@ import jwt from 'jsonwebtoken'; // For generating local JWT
 
 class ClinicAuth0Service {
   constructor() {
-    if (!config.auth0.domain || !config.auth0.clientId || !config.auth0.clientSecret) {
-      console.warn('Auth0 configuration missing. Clinic Auth0 features will not work.');
+    // Check if Auth0 is configured using the flag from config
+    if (!config.auth0.isConfigured) {
+      console.warn('❌ Auth0 configuration is incomplete. Clinic Auth0 features will not work.');
       this.auth0Client = null;
-    } else {
+      return;
+    }
+    
+    try {
       this.auth0Client = new AuthenticationClient({
         domain: config.auth0.domain,
         clientId: config.auth0.clientId,
         clientSecret: config.auth0.clientSecret,
       });
+      console.log('✅ Auth0 client initialized successfully');
+    } catch (error) {
+      console.error('❌ Failed to initialize Auth0 client:', error);
+      this.auth0Client = null;
     }
   }
 
@@ -23,19 +31,26 @@ class ClinicAuth0Service {
    * @returns {string} The authorization URL
    */
   getAuthorizationUrl() {
-    if (!config.auth0.domain || !config.auth0.clientId) {
-      throw new Error('Auth0 domain or client ID is not configured.');
+    if (!this.auth0Client) {
+      throw new Error('Auth0 client is not initialized. Check your configuration.');
+    }
+    
+    // Ensure we have a valid callback URL
+    const callbackUrl = config.auth0.callbackUrls?.[0];
+    if (!callbackUrl) {
+      throw new Error('Auth0 callback URL is not configured.');
     }
 
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: config.auth0.clientId,
-      redirect_uri: config.auth0.callbackUrls?.[0],
+      redirect_uri: callbackUrl,
       scope: 'openid profile email',
-      audience: config.auth0.audience,
+      audience: config.auth0.audience || `https://${config.auth0.domain}/api/v2/`,
     });
 
     const authorizationUrl = `https://${config.auth0.domain}/authorize?${params.toString()}`;
+    console.log('Generated Auth0 authorization URL:', authorizationUrl);
     
     return authorizationUrl;
   }
@@ -51,31 +66,45 @@ class ClinicAuth0Service {
       throw new Error('Auth0 client is not configured.');
     }
 
+    if (!authorizationCode) {
+      throw new Error('No authorization code provided');
+    }
+
     try {
+      console.log('Processing Auth0 callback with code:', authorizationCode.substring(0, 5) + '...');
+      
+      // Ensure we have a valid callback URL
+      const callbackUrl = config.auth0.callbackUrls?.[0];
+      if (!callbackUrl) {
+        throw new Error('Auth0 callback URL is not configured.');
+      }
+      
       // 1. Exchange authorization code for tokens
       const tokenResponse = await this.auth0Client.oauth.codeGrant({
         code: authorizationCode,
-        redirect_uri: config.auth0.callbackUrls?.[0],
+        redirect_uri: callbackUrl,
       });
 
+      if (!tokenResponse || !tokenResponse.data) {
+        throw new Error('Invalid token response from Auth0');
+      }
+
       const accessToken = tokenResponse.data.access_token;
-      // const idToken = tokenResponse.data.id_token; // Can also decode ID token for user info
+      if (!accessToken) {
+        throw new Error('No access token returned from Auth0');
+      }
 
       // 2. Get user profile from Auth0
       const userInfo = await this.auth0Client.users.getInfo(accessToken);
       const profile = userInfo.data;
 
-      if (!profile.email) {
+      if (!profile || !profile.email) {
         throw new Error('Email not available from Auth0 profile.');
       }
 
-      // 3. Find or create local user based on Auth0 ID or email
-      // Decision: Let's prioritize finding by auth0Id (sub) first, then email.
-      // We assume a clinic admin user will exist in the User collection.
-      // We need a way to designate these users as clinic admins.
-      // Option A: A specific role like 'clinic_admin'
-      // Option B: An association via the Clinic model (current setup uses clinic.adminUserId)
+      console.log('Retrieved Auth0 profile for email:', profile.email);
 
+      // 3. Find or create local user based on Auth0 ID or email
       let user = await User.findOne({ auth0Id: profile.sub });
 
       if (!user) {
@@ -85,57 +114,47 @@ class ClinicAuth0Service {
         if (user) {
           // User exists (maybe created via regular signup?), link Auth0 ID
           user.auth0Id = profile.sub;
-          // Ensure the role is appropriate. This is tricky.
-          // If they logged in via Clinic Auth0, should we force their role?
-          // For now, let's assume if found by email, they keep their existing role
-          // but we add the auth0Id.
           user.emailVerified = profile.email_verified;
           await user.save();
+          console.log('Linked existing user to Auth0 ID:', user._id);
         } else {
           // User doesn't exist at all, create a new one
-          // Assign a default role - this needs careful consideration.
-          // Should they be 'clinic_admin' automatically?
-          // Or maybe a default role like 'pending_clinic_admin'?
-          // Let's default to 'admin' for now, assuming this flow is only for clinic admins.
-          // **ASSUMPTION**: A new user created via this Auth0 flow will have the 'admin' role
-          // but will NOT be linked to a clinic initially (clinicId will be null).
           user = await User.create({
             auth0Id: profile.sub,
             email: profile.email,
-            firstName: profile.given_name || profile.nickname || 'Clinic', // Get names from profile
+            firstName: profile.given_name || profile.nickname || 'Clinic', 
             lastName: profile.family_name || 'Admin', 
-            role: 'admin', // Assign 'admin' role - REVIEW THIS LOGIC
+            role: 'admin', // Assign 'admin' role
             emailVerified: profile.email_verified,
-            // We don't have a password, as auth is via Auth0
           });
-          // **NEXT STEP**: The frontend application (e.g., on the /clinic-dashboard) 
-          // should prompt this user to either CREATE a new clinic profile or 
-          // JOIN an existing one (e.g., using an invite code). 
-          // This action would then update the user's clinicId.
+          console.log('Created new user from Auth0 profile:', user._id);
         }
+      } else {
+        console.log('Found existing user with Auth0 ID:', user._id);
       }
 
       // 4. Find associated Clinic (if user is linked)
-      // The user might not be linked to a clinic immediately after Auth0 signup
       let clinic = null;
       if (user.clinicId) {
         clinic = await Clinic.findById(user.clinicId);
+        console.log('Found associated clinic:', clinic?._id || 'None');
       }
 
       // 5. Generate local JWT token for the session
       const localJwtPayload = {
         id: user._id,
-        type: 'user', // Or maybe 'clinic_admin'? Let's stick to 'user' for now as per authMiddleware
+        type: 'user',
         role: user.role,
-        auth0Id: user.auth0Id, // Include Auth0 ID in local token
-        clinicId: user.clinicId ? user.clinicId.toString() : undefined, // Include clinic ID if available
+        auth0Id: user.auth0Id,
+        clinicId: user.clinicId ? user.clinicId.toString() : undefined,
       };
+      
       const localToken = jwt.sign(localJwtPayload, config.jwt.secret, {
         expiresIn: config.jwt.expiresIn,
       });
 
       return {
-        user: user.toObject(), // Return plain object
+        user: user.toObject(),
         clinic: clinic ? clinic.toObject() : null,
         token: localToken,
       };
@@ -145,7 +164,7 @@ class ClinicAuth0Service {
       if (error.response?.data?.error_description) {
          throw new Error(`Auth0 Error: ${error.response.data.error_description}`);
       } 
-      throw new Error('Failed to handle Auth0 callback.');
+      throw new Error('Failed to handle Auth0 callback: ' + (error.message || 'Unknown error'));
     }
   }
 }

@@ -18,7 +18,6 @@ import {
 import { 
   authMiddleware, 
   auditMiddleware,
-  cacheMiddleware 
 } from '../middleware/index.mjs';
 
 const router = express.Router();
@@ -35,8 +34,7 @@ const noCacheMiddleware = (req, res, next) => {
 // Public routes for viewing availability
 router.get(
   '/doctor/:doctorId/slots', 
-  cacheMiddleware.cacheResponse(60), // Cache for 1 minute
-  cacheMiddleware.setCacheHeaders({ isPublic: true, maxAge: 300 }), // 5 minutes for public caching
+  noCacheMiddleware, // Ensure no caching by default now
   getTimeSlots
 );
 
@@ -55,7 +53,6 @@ router.route('/slots')
     authMiddleware.restrictTo('admin', 'doctor', 'staff'), 
     createTimeSlotValidation,
     auditMiddleware.logCreation('timeslot'),
-    cacheMiddleware.clearCacheOnWrite('timeslots'),
     createTimeSlot
   );
 
@@ -64,13 +61,11 @@ router.route('/slots/:slotId')
     authMiddleware.restrictTo('admin', 'doctor', 'staff'),
     updateTimeSlotValidation,
     auditMiddleware.logUpdate('timeslot'),
-    cacheMiddleware.clearCacheOnWrite('timeslots'),
     updateTimeSlot
   )
   .delete(
     authMiddleware.restrictTo('admin', 'doctor', 'staff'),
     auditMiddleware.logDeletion('timeslot'),
-    cacheMiddleware.clearCacheOnWrite('timeslots'),
     deleteTimeSlot
   );
 
@@ -78,8 +73,7 @@ router.route('/slots/:slotId')
 router.post(
   '/doctor/:doctorId/generate', 
   authMiddleware.restrictTo('admin', 'doctor', 'staff'), 
-  auditMiddleware.logCreation('timeslots'),
-  cacheMiddleware.clearCacheOnWrite('timeslots'),
+  auditMiddleware.logCreation('timeslot'),
   generateTimeSlots
 );
 
@@ -87,23 +81,21 @@ router.post(
 router.post(
   '/doctor/:doctorId/import/google', 
   authMiddleware.restrictTo('admin', 'doctor', 'staff'), 
-  auditMiddleware.logCreation('timeslots'),
-  cacheMiddleware.clearCacheOnWrite('timeslots'),
+  auditMiddleware.logCreation('timeslot'),
   importFromGoogle
 );
 
 router.post(
   '/doctor/:doctorId/export/google', 
   authMiddleware.restrictTo('admin', 'doctor', 'staff'), 
-  auditMiddleware.logUpdate('timeslots'),
+  auditMiddleware.logUpdate('timeslot'),
   exportToGoogle
 );
 
 router.post(
   '/doctor/:doctorId/sync/google', 
   authMiddleware.restrictTo('admin', 'doctor', 'staff'), 
-  auditMiddleware.logUpdate('timeslots'),
-  cacheMiddleware.clearCacheOnWrite('timeslots'),
+  auditMiddleware.logUpdate('timeslot'),
   syncWithGoogle
 );
 

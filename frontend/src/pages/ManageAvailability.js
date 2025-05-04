@@ -37,6 +37,7 @@ const ManageAvailability = () => {
   const [success, setSuccess] = useState(null);
   const [anchorEl, setAnchorEl] = useState(null);
   const [doctorId, setDoctorId] = useState(null);
+  const latestFetchRequestTime = React.useRef(null); // Ref to track latest fetch
 
   // Get auth token from localStorage
   const getAuthHeaders = () => {
@@ -91,53 +92,72 @@ const ManageAvailability = () => {
   }, [user?._id]);
 
   // Fetch existing availability for the selected date
-  useEffect(() => {
-    const fetchAvailability = async () => {
-      if (!doctorId) return;
+  const fetchAvailability = async (forceRefresh = false) => {
+    if (!doctorId) return;
+    
+    const currentFetchTime = Date.now();
+    latestFetchRequestTime.current = currentFetchTime;
+    
+    try {
+      setLoading(true);
+      setError(null); // Clear previous errors
       
-      try {
-        setLoading(true);
-        setError(null);
-        
-        // Format the date properly for the API request
-        const formattedDate = format(selectedDate, 'yyyy-MM-dd');
-        
-        console.log('GET Request - Fetch Availability:', {
-          endpoint: `${API_BASE_URL}/availability/doctor/${doctorId}/slots?startDate=${formattedDate}&endDate=${formattedDate}`,
-          method: 'GET',
-          headers: getAuthHeaders()
-        });
+      const formattedDate = format(selectedDate, 'yyyy-MM-dd');
+      const cacheBuster = forceRefresh ? `&_=${Date.now()}` : ''; // Use standard cache busting query param
+      const url = `${API_BASE_URL}/availability/doctor/${doctorId}/slots?startDate=${formattedDate}&endDate=${formattedDate}${cacheBuster}`;
+      
+      console.log('GET Request - Fetch Availability:', { url });
 
-        const response = await fetch(
-          `${API_BASE_URL}/availability/doctor/${doctorId}/slots?startDate=${formattedDate}&endDate=${formattedDate}&nocache=${Date.now()}`,
-          {
-            headers: {
-              ...getAuthHeaders(),
-              'Cache-Control': 'no-cache, no-store, must-revalidate',
-              'Pragma': 'no-cache',
-              'Expires': '0'
-            },
-          }
-        );
-        
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => null);
-          throw new Error(errorData?.message || 'Failed to fetch availability');
-        }
-        
-        const data = await response.json();
-        console.log('Time slots response data:', data);
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          ...getAuthHeaders(),
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        },
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Failed to parse error response' }));
+        throw new Error(errorData?.message || `HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // Only update state if this is the latest fetch request
+      if (latestFetchRequestTime.current === currentFetchTime) {
+        console.log('Time slots response data (latest):', data);
         setTimeSlots(data.data || []);
-      } catch (err) {
+      } else {
+        console.log('Skipping state update for stale fetch request.');
+      }
+    } catch (err) {
+      console.error('Fetch availability error:', err);
+      // Only update error state if this is the latest fetch request
+      if (latestFetchRequestTime.current === currentFetchTime) {
         setError(err.message || 'Failed to fetch availability');
-        console.error('Fetch availability error:', err);
-      } finally {
+        setTimeSlots([]); // Clear slots on error
+      }
+    } finally {
+      // Only turn off loading if this is the latest request completing
+      if (latestFetchRequestTime.current === currentFetchTime) {
         setLoading(false);
       }
-    };
+    }
+  };
 
+  useEffect(() => {
     if (doctorId) {
-      fetchAvailability();
+      fetchAvailability(true); // Initial fetch should be fresh
+      
+      // Polling is commented out for now
+      // const intervalId = setInterval(() => {
+      //   console.log('Polling for updates...');
+      //   fetchAvailability(true);
+      // }, 30000); 
+      // 
+      // return () => clearInterval(intervalId); 
     }
   }, [selectedDate, doctorId]);
 
@@ -146,6 +166,8 @@ const ManageAvailability = () => {
       setError('No doctor profile found. Cannot add time slots.');
       return;
     }
+    setError(null);
+    setSuccess(null);
     setOpenDialog(true);
   };
 
@@ -160,11 +182,17 @@ const ManageAvailability = () => {
       return;
     }
 
+    // Validate that end time is after start time
+    if (newSlot.end <= newSlot.start) {
+      setError('End time must be after start time');
+      return;
+    }
+
     if (!doctorId) {
       setError('Doctor ID not available');
       return;
     }
-
+    
     try {
       setLoading(true);
       setError(null);
@@ -193,30 +221,8 @@ const ManageAvailability = () => {
         throw new Error(errorData?.message || 'Failed to save time slot');
       }
 
-      // Small delay to ensure the backend has processed the changes
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Fetch the updated time slots with no-cache headers
-      const formattedDate = format(selectedDate, 'yyyy-MM-dd');
-      const updatedResponse = await fetch(
-        `${API_BASE_URL}/availability/doctor/${doctorId}/slots?startDate=${formattedDate}&endDate=${formattedDate}&nocache=${Date.now()}`,
-        {
-          headers: {
-            ...getAuthHeaders(),
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
-          },
-        }
-      );
-      
-      if (!updatedResponse.ok) {
-        throw new Error('Failed to refresh time slots');
-      }
-      
-      const updatedData = await updatedResponse.json();
-      console.log('Updated time slots after adding:', updatedData);
-      setTimeSlots(updatedData.data || []);
+      // Force refresh the data from the server
+      await fetchAvailability(true);
       
       setSuccess('Time slot added successfully');
       handleCloseDialog();
@@ -248,30 +254,8 @@ const ManageAvailability = () => {
         throw new Error(errorData?.message || 'Failed to delete time slot');
       }
 
-      // Small delay to ensure the backend has processed the changes
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Refresh the time slots from the server with no-cache headers
-      const formattedDate = format(selectedDate, 'yyyy-MM-dd');
-      const updatedResponse = await fetch(
-        `${API_BASE_URL}/availability/doctor/${doctorId}/slots?startDate=${formattedDate}&endDate=${formattedDate}&nocache=${Date.now()}`,
-        {
-          headers: {
-            ...getAuthHeaders(),
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
-          },
-        }
-      );
-      
-      if (!updatedResponse.ok) {
-        throw new Error('Failed to refresh time slots');
-      }
-      
-      const updatedData = await updatedResponse.json();
-      console.log('Updated time slots after deleting:', updatedData);
-      setTimeSlots(updatedData.data || []);
+      // Force refresh the data from the server
+      await fetchAvailability(true);
       
       setSuccess('Time slot deleted successfully');
     } catch (err) {
@@ -291,6 +275,8 @@ const ManageAvailability = () => {
   };
 
   const handleGenerateConfirmOpen = () => {
+    setError(null);
+    setSuccess(null);
     setGenerateConfirmOpen(true);
     handleMenuClose();
   };
@@ -332,7 +318,10 @@ const ManageAvailability = () => {
       }
 
       const data = await response.json();
-      setTimeSlots(data.data || []);
+      
+      // Force refresh to ensure we get the latest data from the server
+      await fetchAvailability(true);
+      
       setGenerateConfirmOpen(false);
       setSuccess(`Successfully generated ${data.count} time slots`);
     } catch (err) {
@@ -415,7 +404,11 @@ const ManageAvailability = () => {
             <LocalizationProvider dateAdapter={AdapterDateFns}>
               <DateCalendar
                 value={selectedDate}
-                onChange={(newDate) => setSelectedDate(newDate)}
+                onChange={(newDate) => {
+                  setSelectedDate(newDate);
+                  setError(null);
+                  setSuccess(null);
+                }}
               />
             </LocalizationProvider>
           </Paper>
@@ -522,19 +515,55 @@ const ManageAvailability = () => {
                 value={newSlot.start}
                 onChange={(newValue) => setNewSlot({ ...newSlot, start: newValue })}
                 sx={{ mr: 2 }}
+                disabled={loading}
+                slotProps={{
+                  textField: {
+                    helperText: "Select a time that doesn't overlap with existing slots",
+                  }
+                }}
               />
               <TimePicker
                 label="End Time"
                 value={newSlot.end}
                 onChange={(newValue) => setNewSlot({ ...newSlot, end: newValue })}
+                disabled={loading}
+                slotProps={{
+                  textField: {
+                    helperText: "Must be after start time and not overlap with existing slots",
+                  }
+                }}
               />
             </LocalizationProvider>
           </Box>
+          {error && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {error}
+            </Alert>
+          )}
+          {loading && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+              <CircularProgress size={24} />
+              <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>
+                Creating time slot...
+              </Typography>
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button onClick={handleSaveSlot} variant="contained" disabled={loading}>
-            {loading ? <CircularProgress size={24} /> : 'Save'}
+          <Button onClick={handleCloseDialog} disabled={loading}>Cancel</Button>
+          <Button 
+            onClick={handleSaveSlot} 
+            variant="contained" 
+            disabled={loading || !newSlot.start || !newSlot.end}
+          >
+            {loading ? (
+              <>
+                <CircularProgress size={16} color="inherit" sx={{ mr: 1 }} />
+                Saving...
+              </>
+            ) : (
+              'Save'
+            )}
           </Button>
         </DialogActions>
       </Dialog>
@@ -558,11 +587,26 @@ const ManageAvailability = () => {
           <DialogContentText>
             Any existing overlapping slots will be preserved.
           </DialogContentText>
+          {loading && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+              <CircularProgress size={24} />
+              <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>
+                Generating time slots...
+              </Typography>
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleGenerateConfirmClose}>Cancel</Button>
-          <Button onClick={handleGenerateSlots} color="primary">
-            Generate Slots
+          <Button onClick={handleGenerateConfirmClose} disabled={loading}>Cancel</Button>
+          <Button onClick={handleGenerateSlots} color="primary" disabled={loading}>
+            {loading ? (
+              <>
+                <CircularProgress size={16} color="inherit" sx={{ mr: 1 }} />
+                Generating...
+              </>
+            ) : (
+              'Generate Slots'
+            )}
           </Button>
         </DialogActions>
       </Dialog>

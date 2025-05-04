@@ -49,7 +49,7 @@ const Header = () => {
             Dashboard
           </Button>
         ) : (
-          <Button color="inherit" component={RouterLink} to="/my-dashboard">
+          <Button color="inherit" component={RouterLink} to="/dashboard">
             My Dashboard
           </Button>
         )}

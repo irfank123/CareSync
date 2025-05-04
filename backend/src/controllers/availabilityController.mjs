@@ -1,7 +1,6 @@
 // src/controllers/availabilityController.mjs
 
-import { validationResult } from 'express-validator';
-import { check } from 'express-validator';
+import { validationResult, check } from 'express-validator';
 import availabilityService from '../services/availabilityService.mjs';
 import { asyncHandler, AppError, formatValidationErrors } from '../utils/errorHandler.mjs';
 import mongoose from 'mongoose';
@@ -138,91 +137,155 @@ export const getAvailableTimeSlots = asyncHandler(async (req, res, next) => {
  * @route   POST /api/availability/slots
  * @access  Private (Admin, Doctor or Staff)
  */
-export const createTimeSlot = asyncHandler(async (req, res, next) => {
-  // Check for validation errors
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json(formatValidationErrors(errors.array()));
-  }
+export const createTimeSlot = [
+  // Validation rules
+  check('doctorId')
+    .notEmpty().withMessage('Doctor ID is required')
+    .isMongoId().withMessage('Invalid doctor ID format'),
+  check('date')
+    .notEmpty().withMessage('Date is required')
+    .isISO8601().withMessage('Date must be a valid ISO 8601 date'),
+  check('startTime')
+    .notEmpty().withMessage('Start time is required')
+    .matches(/^([01]\d|2[0-3]):([0-5]\d)$/).withMessage('Start time must be in HH:MM format (24-hour)'),
+  check('endTime')
+    .notEmpty().withMessage('End time is required')
+    .matches(/^([01]\d|2[0-3]):([0-5]\d)$/).withMessage('End time must be in HH:MM format (24-hour)')
+    .custom((value, { req }) => {
+      // Custom validation to ensure end time is after start time
+      if (value <= req.body.startTime) {
+        throw new Error('End time must be after start time');
+      }
+      return true;
+    }),
   
-  // Add user ID to slot data for audit
-  req.body.createdBy = req.user._id;
-  
-  // Modified permission check - Get the doctor record to check ownership
-  let canCreateSlot = false;
-  
-  if (req.userRole === 'admin' || req.userRole === 'staff') {
-    canCreateSlot = true;
-  } else if (req.userRole === 'doctor') {
-    // Fetch the doctor to check if this user is the owner
-    const { Doctor } = await import('../models/index.mjs');
-    const doctor = await Doctor.findById(req.body.doctorId);
-    
-    if (doctor && doctor.userId.toString() === req.user._id.toString()) {
-      canCreateSlot = true;
+  asyncHandler(async (req, res, next) => {
+    // Check for validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json(formatValidationErrors(errors.array()));
     }
-  }
-  
-  if (!canCreateSlot) {
-    return next(new AppError('You are not authorized to create time slots for this doctor', 403));
-  }
-  
-  const timeSlot = await availabilityService.createTimeSlot(req.body);
-  
-  res.status(201).json({
-    success: true,
-    data: timeSlot
-  });
-});
+    
+    // Add user ID to slot data for audit
+    req.body.createdBy = req.user._id;
+    
+    // Modified permission check - Get the doctor record to check ownership
+    let canCreateSlot = false;
+    
+    if (req.userRole === 'admin' || req.userRole === 'staff') {
+      canCreateSlot = true;
+    } else if (req.userRole === 'doctor') {
+      // Fetch the doctor to check if this user is the owner
+      const { Doctor } = await import('../models/index.mjs');
+      const doctor = await Doctor.findById(req.body.doctorId);
+      
+      if (doctor && doctor.userId.toString() === req.user._id.toString()) {
+        canCreateSlot = true;
+      }
+    }
+    
+    if (!canCreateSlot) {
+      return next(new AppError('You are not authorized to create time slots for this doctor', 403));
+    }
+    
+    try {
+      const timeSlot = await availabilityService.createTimeSlot(req.body);
+      
+      res.status(201).json({
+        success: true,
+        data: timeSlot
+      });
+    } catch (error) {
+      // Return a clear error message if there's a time slot conflict
+      if (error.message.includes('Time slot conflicts with')) {
+        return next(new AppError(error.message, 400));
+      }
+      return next(new AppError(`Failed to create time slot: ${error.message}`, 500));
+    }
+  })
+];
 
 /**
  * @desc    Update a time slot
  * @route   PUT /api/availability/slots/:slotId
  * @access  Private (Admin, Doctor or Staff)
  */
-export const updateTimeSlot = asyncHandler(async (req, res, next) => {
-  // Check for validation errors
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json(formatValidationErrors(errors.array()));
-  }
-  
-  const slotId = req.params.slotId;
-  
-  // Check if the user has permission to update this slot
-  // This requires getting the slot first to check the doctor ID
-  const slot = await availabilityService.getTimeSlotById(slotId);
-  
-  if (!slot) {
-    return next(new AppError('Time slot not found', 404));
-  }
-  
-  // Modified permission check
-  let canUpdateSlot = false;
-  
-  if (req.userRole === 'admin' || req.userRole === 'staff') {
-    canUpdateSlot = true;
-  } else if (req.userRole === 'doctor') {
-    // Fetch the doctor to check if this user is the owner
-    const { Doctor } = await import('../models/index.mjs');
-    const doctor = await Doctor.findById(slot.doctorId);
+export const updateTimeSlot = [
+  // Validation rules for optional update fields
+  check('date')
+    .optional()
+    .isISO8601().withMessage('Date must be a valid ISO 8601 date'),
+  check('startTime')
+    .optional()
+    .matches(/^([01]\d|2[0-3]):([0-5]\d)$/).withMessage('Start time must be in HH:MM format (24-hour)'),
+  check('endTime')
+    .optional()
+    .matches(/^([01]\d|2[0-3]):([0-5]\d)$/).withMessage('End time must be in HH:MM format (24-hour)')
+    .custom((value, { req }) => {
+      // If both start time and end time are provided in the update
+      if (req.body.startTime && value <= req.body.startTime) {
+        throw new Error('End time must be after start time');
+      }
+      return true;
+    }),
+  check('status')
+    .optional()
+    .isIn(['available', 'booked', 'blocked']).withMessage('Status must be available, booked, or blocked'),
     
-    if (doctor && doctor.userId.toString() === req.user._id.toString()) {
-      canUpdateSlot = true;
+  asyncHandler(async (req, res, next) => {
+    // Check for validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json(formatValidationErrors(errors.array()));
     }
-  }
-  
-  if (!canUpdateSlot) {
-    return next(new AppError('You are not authorized to update this time slot', 403));
-  }
-  
-  const updatedSlot = await availabilityService.updateTimeSlot(slotId, req.body, req.user._id);
-  
-  res.status(200).json({
-    success: true,
-    data: updatedSlot
-  });
-});
+    
+    const slotId = req.params.slotId;
+    
+    // Check if the user has permission to update this slot
+    // This requires getting the slot first to check the doctor ID
+    const slot = await availabilityService.getTimeSlotById(slotId);
+    
+    if (!slot) {
+      return next(new AppError('Time slot not found', 404));
+    }
+    
+    // Modified permission check
+    let canUpdateSlot = false;
+    
+    if (req.userRole === 'admin' || req.userRole === 'staff') {
+      canUpdateSlot = true;
+    } else if (req.userRole === 'doctor') {
+      // Fetch the doctor to check if this user is the owner
+      const { Doctor } = await import('../models/index.mjs');
+      const doctor = await Doctor.findById(slot.doctorId);
+      
+      if (doctor && doctor.userId.toString() === req.user._id.toString()) {
+        canUpdateSlot = true;
+      }
+    }
+    
+    if (!canUpdateSlot) {
+      return next(new AppError('You are not authorized to update this time slot', 403));
+    }
+    
+    try {
+      const updatedSlot = await availabilityService.updateTimeSlot(slotId, req.body, req.user._id);
+      
+      res.status(200).json({
+        success: true,
+        data: updatedSlot
+      });
+    } catch (error) {
+      // Return appropriate error messages based on the error type
+      if (error.message.includes('Updated time slot would conflict with')) {
+        return next(new AppError(error.message, 400));
+      } else if (error.message.includes('Cannot change time or date of a booked slot')) {
+        return next(new AppError(error.message, 403));
+      }
+      return next(new AppError(`Failed to update time slot: ${error.message}`, 500));
+    }
+  })
+];
 
 /**
  * @desc    Delete a time slot
@@ -347,18 +410,23 @@ export const generateTimeSlots = asyncHandler(async (req, res, next) => {
     return next(new AppError('You are not authorized to generate time slots for this doctor', 403));
   }
   
-  const timeSlots = await availabilityService.generateStandardTimeSlots(
-    doctorId, 
-    start, 
-    end, 
-    req.user._id
-  );
-  
-  res.status(201).json({
-    success: true,
-    count: timeSlots.length,
-    data: timeSlots
-  });
+  try {
+    const timeSlots = await availabilityService.generateStandardTimeSlots(
+      doctorId, 
+      start, 
+      end, 
+      req.user._id
+    );
+    
+    res.status(201).json({
+      success: true,
+      count: timeSlots.length,
+      data: timeSlots
+    });
+  } catch (error) {
+    console.error('Generate time slots error:', error);
+    return next(new AppError(`Failed to generate time slots: ${error.message}`, 500));
+  }
 });
 
 /**

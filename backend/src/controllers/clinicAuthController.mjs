@@ -387,6 +387,16 @@ const initiateClinicAuth0Login = async (req, res, next, { clinicAuth0Service }) 
 const handleClinicAuth0Callback = async (req, res, next, { clinicAuth0Service }) => {
   const { code, error, error_description } = req.query;
 
+  console.log('Auth0 callback received:', {
+    hasCode: !!code,
+    error: error || 'none',
+    path: req.path,
+    headers: {
+      host: req.headers.host,
+      referer: req.headers.referer
+    }
+  });
+
   if (error) {
     console.error('Auth0 callback error:', error, error_description);
     // Redirect to a frontend error page with error info
@@ -394,31 +404,55 @@ const handleClinicAuth0Callback = async (req, res, next, { clinicAuth0Service })
   }
 
   if (!code) {
-    console.error('Auth0 callback missing code.');
-    return res.redirect(`${config.frontendUrl}/auth/error?message=Authorization code missing`);
+    console.error('Auth0 callback missing authorization code');
+    return res.redirect(`${config.frontendUrl}/auth/error?message=${encodeURIComponent('Authorization code missing')}`);
   }
 
   try {
+    console.log('Processing Auth0 callback with code:', code.substring(0, 5) + '...');
     const { user, clinic, token } = await clinicAuth0Service.handleCallback(code);
-
-    // Set cookie with the local JWT token
-    const options = {
+    
+    if (!token) {
+      console.error('No token generated after Auth0 callback processing');
+      return res.redirect(`${config.frontendUrl}/auth/error?message=${encodeURIComponent('Authentication failed - no token')}`);
+    }
+    
+    console.log('Auth0 authentication successful:', {
+      userId: user._id,
+      userEmail: user.email,
+      hasClinic: !!clinic,
+      tokenSet: !!token
+    });
+    
+    // Set cookie with the local JWT token with client-accessible settings
+    const cookieOptions = {
       expires: new Date(Date.now() + config.jwt.cookieOptions.maxAge),
-      httpOnly: config.jwt.cookieOptions.httpOnly,
-      secure: config.jwt.cookieOptions.secure,
+      httpOnly: false, // Make accessible to JavaScript
+      secure: false, // Set to true in production with HTTPS
+      sameSite: 'lax', // Less restrictive SameSite setting
+      path: '/', // Ensure cookie is available across the whole site
     };
 
-    res.cookie('token', token, options);
-
-    // Redirect to the frontend
-    // Decision: Redirect to a generic clinic dashboard or a specific setup page?
-    // Let's redirect to a placeholder /clinic-dashboard for now.
-    res.redirect(`${config.frontendUrl}/clinic-dashboard`); // TODO: Define this route in frontend
-
+    // Set the cookie with updated options
+    res.cookie('token', token, cookieOptions);
+    
+    // Also set a debug cookie to verify cookie setting is working
+    res.cookie('auth_debug', 'token_set_' + Date.now(), { 
+      httpOnly: false,
+      path: '/'
+    });
+    
+    console.log('Auth0 authentication successful, cookies set, redirecting to dashboard');
+    
+    // Redirect to the frontend dashboard with success param
+    res.redirect(`${config.frontendUrl}/clinic-dashboard?auth=success`);
+    
   } catch (error) {
     console.error('Auth0 callback processing error:', error);
-    // Redirect to a frontend error page
-    res.redirect(`${config.frontendUrl}/auth/error?message=${encodeURIComponent(error.message || 'Login failed' )}`);
+    // Redirect to a frontend error page with detailed error
+    const errorMessage = error.message || 'Login failed';
+    console.error('Redirecting to error page with message:', errorMessage);
+    res.redirect(`${config.frontendUrl}/auth/error?message=${encodeURIComponent(errorMessage)}`);
   }
 };
 

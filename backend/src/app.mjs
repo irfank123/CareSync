@@ -48,7 +48,34 @@ const createApp = () => {
   app.use(errorMiddleware.payloadTooLarge);
   
   // CORS middleware
-  app.use(cors(config.cors));
+  app.use(cors({
+    origin: config.cors.origin,
+    credentials: true, // Allow cookies to be included with requests
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'Pragma', 'Expires']
+  }));
+  
+  // Add middleware for tracking the origin to help with debugging redirection issues
+  app.use((req, res, next) => {
+    // Log the origin and referer to help diagnose cross-origin issues
+    console.log('Request origin:', req.headers.origin || 'None');
+    console.log('Request referer:', req.headers.referer || 'None');
+    
+    // For the Auth0 callback specifically, log more details
+    if (req.path.includes('/auth0/callback')) {
+      console.log('Auth0 callback request details:', {
+        path: req.path,
+        method: req.method,
+        query: req.query,
+        hasCookies: !!req.headers.cookie,
+        origin: req.headers.origin || 'none'
+      });
+    }
+    
+    // Ensure we can send cookies cross-origin if needed
+    res.header('Access-Control-Allow-Credentials', 'true');
+    next();
+  });
   
   // Logging middleware
   if (config.env === 'development') {

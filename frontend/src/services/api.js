@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { safeObjectId } from '../utils/stringUtils';
+import Cookies from 'js-cookie';
 
 // Validate environment variables
 if (!process.env.REACT_APP_API_URL) {
@@ -21,10 +22,23 @@ export const axiosInstance = api;
 // Add request interceptor for token
 api.interceptors.request.use(
   (config) => {
+    // First check for token in localStorage (for regular users)
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+      return config;
     }
+    
+    // If no token in localStorage, try to get from cookies (for clinic users)
+    try {
+      const cookieToken = Cookies.get('token');
+      if (cookieToken) {
+        config.headers.Authorization = `Bearer ${cookieToken}`;
+      }
+    } catch (error) {
+      console.error('Error accessing cookie token:', error);
+    }
+    
     return config;
   },
   (error) => {

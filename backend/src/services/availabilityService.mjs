@@ -103,11 +103,12 @@ class AvailabilityService {
   /**
    * Get a specific time slot by ID
    * @param {string} slotId - Time slot ID
-   * @returns {Object} Time slot
+   * @returns {Object} Time slot (plain object)
    */
   async getTimeSlotById(slotId) {
     try {
-      return await TimeSlot.findById(slotId);
+      // Use .lean() to return a plain JS object
+      return await TimeSlot.findById(slotId).lean();
     } catch (error) {
       console.error('Get time slot by ID error:', error);
       throw new Error('Failed to retrieve time slot');
@@ -167,6 +168,9 @@ class AvailabilityService {
    * @returns {Object} Created time slot
    */
   async createTimeSlot(slotData) {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
       // Validate required fields
       if (!slotData.doctorId || !slotData.date || !slotData.startTime || !slotData.endTime) {
@@ -179,46 +183,58 @@ class AvailabilityService {
         throw new Error('Doctor not found');
       }
       
-      // Check for existing overlapping time slots
+      // Convert input times to standard format if needed
+      const startTime = slotData.startTime.includes(':') ? slotData.startTime : `${slotData.startTime}:00`;
+      const endTime = slotData.endTime.includes(':') ? slotData.endTime : `${slotData.endTime}:00`;
+      
+      // Check for existing overlapping time slots - this is critical
       const overlappingSlot = await this.checkOverlappingTimeSlots(
         slotData.doctorId,
         slotData.date,
-        slotData.startTime,
-        slotData.endTime
+        startTime,
+        endTime
       );
       
       if (overlappingSlot) {
-        throw new Error('Time slot overlaps with an existing slot');
+        const dateString = new Date(overlappingSlot.date).toLocaleDateString();
+        throw new Error(`Time slot conflicts with an existing appointment (${dateString}, ${overlappingSlot.startTime}-${overlappingSlot.endTime})`);
       }
       
       // Create the time slot
-      const timeSlot = await TimeSlot.create({
+      const timeSlot = await TimeSlot.create([{
         doctorId: slotData.doctorId,
         date: slotData.date,
-        startTime: slotData.startTime,
-        endTime: slotData.endTime,
+        startTime: startTime,
+        endTime: endTime,
         status: slotData.status || 'available'
-      });
+      }], { session });
       
       // Create audit log
-      await AuditLog.create({
+      await AuditLog.create([{
         userId: slotData.createdBy || slotData.doctorId,
         action: 'create',
         resource: 'timeslot',
-        resourceId: timeSlot._id,
+        resourceId: timeSlot[0]._id,
         details: {
           doctorId: slotData.doctorId,
           date: slotData.date,
-          startTime: slotData.startTime,
-          endTime: slotData.endTime,
-          status: timeSlot.status
+          startTime: startTime,
+          endTime: endTime,
+          status: timeSlot[0].status
         }
-      });
+      }], { session });
       
-      return timeSlot;
+      // Commit transaction
+      await session.commitTransaction();
+      
+      return timeSlot[0];
     } catch (error) {
+      // Abort transaction on error
+      await session.abortTransaction();
       console.error('Create time slot error:', error);
       throw new Error(`Failed to create time slot: ${error.message}`);
+    } finally {
+      session.endSession();
     }
   }
 
@@ -227,12 +243,16 @@ class AvailabilityService {
    * @param {string} slotId - Time slot ID
    * @param {Object} updateData - Data to update
    * @param {string} userId - User making the update
-   * @returns {Object} Updated time slot
+   * @returns {Object} Updated time slot (plain object)
    */
   async updateTimeSlot(slotId, updateData, userId) {
+    let session;
     try {
-      // Find the time slot
-      const timeSlot = await TimeSlot.findById(slotId);
+      session = await mongoose.startSession();
+      session.startTransaction();
+
+      // Find the time slot within the transaction
+      const timeSlot = await TimeSlot.findById(slotId).session(session);
       if (!timeSlot) {
         throw new Error('Time slot not found');
       }
@@ -240,7 +260,7 @@ class AvailabilityService {
       // If updating time or date, check for overlaps
       if ((updateData.startTime && updateData.startTime !== timeSlot.startTime) ||
           (updateData.endTime && updateData.endTime !== timeSlot.endTime) ||
-          (updateData.date && updateData.date.toString() !== timeSlot.date.toString())) {
+          (updateData.date && new Date(updateData.date).toISOString() !== timeSlot.date.toISOString())) {
             
         const overlappingSlot = await this.checkOverlappingTimeSlots(
           timeSlot.doctorId,
@@ -251,7 +271,8 @@ class AvailabilityService {
         );
         
         if (overlappingSlot) {
-          throw new Error('Updated time slot would overlap with an existing slot');
+          const dateString = new Date(overlappingSlot.date).toLocaleDateString();
+          throw new Error(`Updated time slot would conflict with an existing appointment (${dateString}, ${overlappingSlot.startTime}-${overlappingSlot.endTime})`);
         }
       }
       
@@ -261,15 +282,20 @@ class AvailabilityService {
         throw new Error('Cannot change time or date of a booked slot');
       }
       
-      // Update the time slot
-      const updatedSlot = await TimeSlot.findByIdAndUpdate(
+      // Update the time slot within the transaction
+      const updatedSlotDoc = await TimeSlot.findByIdAndUpdate(
         slotId,
         { $set: updateData },
-        { new: true, runValidators: true }
+        { new: true, runValidators: true, session: session }
       );
+
+      if (!updatedSlotDoc) {
+        // Should not happen if findById found it, but good practice
+        throw new Error('Failed to update time slot after finding it.');
+      }
       
-      // Create audit log
-      await AuditLog.create({
+      // Create audit log within the transaction
+      await AuditLog.create([{
         userId: userId || timeSlot.doctorId,
         action: 'update',
         resource: 'timeslot',
@@ -280,12 +306,23 @@ class AvailabilityService {
           previousStatus: timeSlot.status,
           newStatus: updateData.status || timeSlot.status
         }
-      });
+      }], { session });
       
-      return updatedSlot;
+      // Commit the transaction
+      await session.commitTransaction();
+
+      // Return a plain JS object
+      return updatedSlotDoc.toObject();
     } catch (error) {
+      if (session) {
+        await session.abortTransaction();
+      }
       console.error('Update time slot error:', error);
       throw new Error(`Failed to update time slot: ${error.message}`);
+    } finally {
+      if (session) {
+        session.endSession();
+      }
     }
   }
 
@@ -501,6 +538,11 @@ class AvailabilityService {
     const startTimeMinutes = this._timeToMinutes(startTime);
     const endTimeMinutes = this._timeToMinutes(endTime);
     
+    // Ensure end time is after start time
+    if (endTimeMinutes <= startTimeMinutes) {
+      throw new Error('End time must be after start time');
+    }
+    
     // Create query to find overlapping slots
     const query = {
       doctorId,
@@ -512,23 +554,38 @@ class AvailabilityService {
       query._id = { $ne: excludeSlotId };
     }
     
+    console.log(`Checking for overlaps: ${startTime}-${endTime} on ${dateToCheck.toISOString()}`);
+    
     // Find all slots for this doctor on this date
     const slotsOnDate = await TimeSlot.find(query);
+    console.log(`Found ${slotsOnDate.length} existing slots to check against`);
     
     // Check each slot for overlap
     for (const slot of slotsOnDate) {
       const slotStartMinutes = this._timeToMinutes(slot.startTime);
       const slotEndMinutes = this._timeToMinutes(slot.endTime);
       
-      // Check for overlap
-      if (
+      console.log(`Comparing with existing slot: ${slot.startTime}-${slot.endTime} (${slotStartMinutes}-${slotEndMinutes} minutes)`);
+      console.log(`New slot: ${startTime}-${endTime} (${startTimeMinutes}-${endTimeMinutes} minutes)`);
+      
+      // Check for any type of overlap:
+      // 1. New slot starts during existing slot
+      // 2. New slot ends during existing slot
+      // 3. New slot completely contains existing slot
+      // 4. New slot is completely contained within existing slot
+      const overlap = (
         // New slot starts during existing slot
         (startTimeMinutes >= slotStartMinutes && startTimeMinutes < slotEndMinutes) ||
         // New slot ends during existing slot
         (endTimeMinutes > slotStartMinutes && endTimeMinutes <= slotEndMinutes) ||
         // New slot completely contains existing slot
-        (startTimeMinutes <= slotStartMinutes && endTimeMinutes >= slotEndMinutes)
-      ) {
+        (startTimeMinutes <= slotStartMinutes && endTimeMinutes >= slotEndMinutes) ||
+        // New slot is completely contained within existing slot
+        (startTimeMinutes >= slotStartMinutes && endTimeMinutes <= slotEndMinutes)
+      );
+      
+      if (overlap) {
+        console.log(`OVERLAP DETECTED: New slot ${startTime}-${endTime} overlaps with existing slot ${slot.startTime}-${slot.endTime}`);
         return slot;
       }
     }
@@ -1261,139 +1318,156 @@ async syncWithGoogleCalendar(doctorId, refreshToken, startDate, endDate, userId)
   async generateStandardTimeSlots(doctorId, startDate, endDate, userId) {
     const session = await mongoose.startSession();
     session.startTransaction();
-    
+    console.log(`[generateStandardTimeSlots] Transaction started for doctor ${doctorId}`);
+
     try {
-      // Get doctor
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         throw new Error('Doctor not found');
       }
-      
-      // Default to current date if not provided
+
       const start = startDate || new Date();
-      
-      // Default to the same day if endDate not provided
       const end = endDate || new Date(start);
-      
-      const generatedSlots = [];
-      
-      // Fixed appointment duration of 20 minutes
-      const appointmentDuration = 20;
-      
-      // Loop through each day in the date range
+      console.log(`[generateStandardTimeSlots] Date range: ${start.toISOString()} to ${end.toISOString()}`);
+
+      // --- Deletion Phase ---
+      console.log(`[generateStandardTimeSlots] Starting deletion phase...`);
       for (let day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
-        const currentDate = new Date(day);
-        
-        // Morning slots (9am to 12pm)
-        let slotStart = new Date(currentDate);
-        slotStart.setHours(9, 0, 0, 0);
-        
-        const morningEnd = new Date(currentDate);
-        morningEnd.setHours(12, 0, 0, 0);
-        
-        // Generate morning slots (9am to 12pm)
-        while (slotStart.getTime() + appointmentDuration * 60000 <= morningEnd.getTime()) {
-          const slotEndTime = new Date(slotStart.getTime() + appointmentDuration * 60000);
-          
-          // Format times as HH:MM
-          const formattedStartTime = 
-            `${String(slotStart.getHours()).padStart(2, '0')}:${String(slotStart.getMinutes()).padStart(2, '0')}`;
-          
-          const formattedEndTime = 
-            `${String(slotEndTime.getHours()).padStart(2, '0')}:${String(slotEndTime.getMinutes()).padStart(2, '0')}`;
-          
-          // Check for existing overlapping slots
-          const overlappingSlot = await this.checkOverlappingTimeSlots(
-            doctorId,
-            new Date(currentDate),
-            formattedStartTime,
-            formattedEndTime
-          );
-          
-          // Only create slot if no overlap exists
-          if (!overlappingSlot) {
-            const newSlot = await TimeSlot.create([{
-              doctorId,
-              date: new Date(currentDate),
-              startTime: formattedStartTime,
-              endTime: formattedEndTime,
-              status: 'available'
-            }], { session });
-            
-            generatedSlots.push(newSlot[0]);
+        // Calculate start and end of the target day in UTC
+        const targetDayStart = new Date(day);
+        targetDayStart.setUTCHours(0, 0, 0, 0); // Start of the day in UTC
+
+        const nextDayStart = new Date(targetDayStart);
+        nextDayStart.setUTCDate(targetDayStart.getUTCDate() + 1); // Start of the next day in UTC
+
+        console.log(`[generateStandardTimeSlots] Processing deletion for date range: ${targetDayStart.toISOString()} to ${nextDayStart.toISOString()}`);
+
+        // Query for slots within the entire day
+        const deleteQuery = {
+          doctorId,
+          date: {
+            $gte: targetDayStart,
+            $lt: nextDayStart
           }
-          
-          // Move to next slot
-          slotStart.setTime(slotStart.getTime() + appointmentDuration * 60000);
-        }
-        
-        // Afternoon slots (1pm to 5pm)
-        slotStart = new Date(currentDate);
-        slotStart.setHours(13, 0, 0, 0);
-        
-        const afternoonEnd = new Date(currentDate);
-        afternoonEnd.setHours(17, 0, 0, 0);
-        
-        // Generate afternoon slots (1pm to 5pm)
-        while (slotStart.getTime() + appointmentDuration * 60000 <= afternoonEnd.getTime()) {
-          const slotEndTime = new Date(slotStart.getTime() + appointmentDuration * 60000);
-          
-          // Format times as HH:MM
-          const formattedStartTime = 
-            `${String(slotStart.getHours()).padStart(2, '0')}:${String(slotStart.getMinutes()).padStart(2, '0')}`;
-          
-          const formattedEndTime = 
-            `${String(slotEndTime.getHours()).padStart(2, '0')}:${String(slotEndTime.getMinutes()).padStart(2, '0')}`;
-          
-          // Check for existing overlapping slots
-          const overlappingSlot = await this.checkOverlappingTimeSlots(
-            doctorId,
-            new Date(currentDate),
-            formattedStartTime,
-            formattedEndTime
-          );
-          
-          // Only create slot if no overlap exists
-          if (!overlappingSlot) {
-            const newSlot = await TimeSlot.create([{
+        };
+        console.log(`[generateStandardTimeSlots] Delete query (deleting ALL slots for the day range):`, JSON.stringify(deleteQuery));
+
+        const deleteResult = await TimeSlot.deleteMany(deleteQuery, { session });
+        console.log(`[generateStandardTimeSlots] Deletion result for ${targetDayStart.toISOString().split('T')[0]}:`, deleteResult);
+
+        if (deleteResult.deletedCount > 0) {
+          await AuditLog.create([{
+            userId: userId || doctorId,
+            action: 'delete',
+            resource: 'timeslot',
+            details: {
               doctorId,
-              date: new Date(currentDate),
-              startTime: formattedStartTime,
-              endTime: formattedEndTime,
-              status: 'available'
-            }], { session });
-            
-            generatedSlots.push(newSlot[0]);
-          }
-          
-          // Move to next slot
-          slotStart.setTime(slotStart.getTime() + appointmentDuration * 60000);
+              date: targetDayStart.toISOString().split('T')[0], // Log the date string
+              count: deleteResult.deletedCount,
+              reason: 'regenerate-slots-delete-all'
+            }
+          }], { session });
+          console.log(`[generateStandardTimeSlots] Audit log created for deletion of ${deleteResult.deletedCount} slots.`);
         }
       }
-      
-      // Create audit log
-      await AuditLog.create([{
-        userId: userId || doctorId,
-        action: 'create',
-        resource: 'timeslot',
-        details: {
-          doctorId,
-          startDate: start,
-          endDate: end,
-          slotsGenerated: generatedSlots.length
+      console.log(`[generateStandardTimeSlots] Deletion phase completed.`);
+
+      // --- Creation Phase ---
+      console.log(`[generateStandardTimeSlots] Starting creation phase...`);
+      const generatedSlots = [];
+      const appointmentDuration = 20;
+
+      for (let day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
+        const currentDate = new Date(day);
+        const dateForOverlapCheck = new Date(day).setHours(0, 0, 0, 0); // Normalized date for overlap query
+        console.log(`[generateStandardTimeSlots] Generating slots for date: ${currentDate.toISOString()}`);
+
+        const timeRanges = [
+          { startHour: 9, endHour: 12 }, // Morning
+          { startHour: 13, endHour: 17 } // Afternoon
+        ];
+
+        for (const range of timeRanges) {
+          let slotStart = new Date(currentDate);
+          slotStart.setHours(range.startHour, 0, 0, 0);
+          const rangeEnd = new Date(currentDate);
+          rangeEnd.setHours(range.endHour, 0, 0, 0);
+
+          console.log(`[generateStandardTimeSlots] Processing range ${range.startHour}:00 to ${range.endHour}:00`);
+
+          while (slotStart.getTime() + appointmentDuration * 60000 <= rangeEnd.getTime()) {
+            const slotEndTime = new Date(slotStart.getTime() + appointmentDuration * 60000);
+            const formattedStartTime = `${String(slotStart.getHours()).padStart(2, '0')}:${String(slotStart.getMinutes()).padStart(2, '0')}`;
+            const formattedEndTime = `${String(slotEndTime.getHours()).padStart(2, '0')}:${String(slotEndTime.getMinutes()).padStart(2, '0')}`;
+
+            // Check overlap ONLY against BOOKED slots
+            const bookedOverlapQuery = {
+              doctorId,
+              date: dateForOverlapCheck,
+              status: 'booked',
+              $or: [
+                { startTime: { $gte: formattedStartTime, $lt: formattedEndTime } }
+              ]
+            };
+            // console.log(`[generateStandardTimeSlots] Checking booked overlap for ${formattedStartTime}-${formattedEndTime} with query:`, JSON.stringify(bookedOverlapQuery));
+            const bookedOverlappingSlot = await TimeSlot.findOne(bookedOverlapQuery).session(session);
+
+            if (!bookedOverlappingSlot) {
+              console.log(`[generateStandardTimeSlots] Creating slot: ${formattedStartTime} - ${formattedEndTime}`);
+              const newSlotData = {
+                doctorId,
+                date: new Date(currentDate), // Use the non-normalized date for storage
+                startTime: formattedStartTime,
+                endTime: formattedEndTime,
+                status: 'available'
+              };
+              const newSlotResult = await TimeSlot.create([newSlotData], { session });
+              if (newSlotResult && newSlotResult.length > 0) {
+                generatedSlots.push(newSlotResult[0]);
+                console.log(`[generateStandardTimeSlots] Slot created successfully: ID ${newSlotResult[0]._id}`);
+              } else {
+                console.error(`[generateStandardTimeSlots] Failed to create slot for ${formattedStartTime}-${formattedEndTime}`);
+              }
+            } else {
+              console.log(`[generateStandardTimeSlots] Skipping slot ${formattedStartTime}-${formattedEndTime} due to overlap with booked slot ID: ${bookedOverlappingSlot._id}`);
+            }
+            slotStart.setTime(slotStart.getTime() + appointmentDuration * 60000);
+          }
         }
-      }], { session });
-      
-      // Commit the transaction
+      }
+      console.log(`[generateStandardTimeSlots] Creation phase completed. ${generatedSlots.length} slots generated.`);
+
+      // --- Audit Log for Creation ---
+      if (generatedSlots.length > 0) {
+        await AuditLog.create([{
+          userId: userId || doctorId,
+          action: 'create',
+          resource: 'timeslot',
+          details: {
+            doctorId,
+            startDate: start,
+            endDate: end,
+            slotsGenerated: generatedSlots.length,
+            reason: 'regenerate-slots'
+          }
+        }], { session });
+        console.log(`[generateStandardTimeSlots] Audit log created for generation of ${generatedSlots.length} slots.`);
+      }
+
+      // --- Commit ---
+      console.log(`[generateStandardTimeSlots] Attempting to commit transaction...`);
       await session.commitTransaction();
-      
-      return generatedSlots;
+      console.log(`[generateStandardTimeSlots] Transaction committed successfully.`);
+
+      const plainGeneratedSlots = generatedSlots.map(slot => slot.toObject());
+      return plainGeneratedSlots;
     } catch (error) {
-      // Abort transaction on error
+      console.error(`[generateStandardTimeSlots] Error occurred: ${error.message}. Aborting transaction.`);
       await session.abortTransaction();
-      console.error('Generate time slots error:', error);
+      console.error('Generate time slots error details:', error);
       throw new Error(`Failed to generate time slots: ${error.message}`);
     } finally {
+      console.log(`[generateStandardTimeSlots] Ending session.`);
       session.endSession();
     }
   }

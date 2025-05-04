@@ -17,14 +17,14 @@ import { useClinicAuth } from '../context/ClinicAuthContext';
 
 const features = [
   {
-    title: 'Easy Appointment Booking',
-    description: 'Book appointments with your preferred doctors in just a few clicks.',
+    title: 'Appointment Management',
+    description: 'Schedule and manage your appointments with ease.',
     icon: '📅',
   },
   {
-    title: 'Doctor Profiles',
-    description: 'View detailed profiles of doctors, including their specialties and availability.',
-    icon: '👨‍⚕️',
+    title: 'Prescription Tracking',
+    description: 'Keep track of your prescriptions and medications.',
+    icon: '💊',
   },
   {
     title: 'Medical History',
@@ -45,30 +45,38 @@ const Home = () => {
 
   // Initiate Auth0 login/signup flow by redirecting to the backend endpoint
   const initiateAuth0Flow = () => {
-    const baseUrlString = process.env.REACT_APP_API_URL || window.location.origin;
-    let relativeAuthPath = '/api/auth/clinic/auth0/login'; // Path relative to API root
-
+    const baseApiUrl = process.env.REACT_APP_API_URL || window.location.origin;
+    
     try {
-      const baseUrl = new URL(baseUrlString);
+      // Create a URL object for easier manipulation
+      const apiUrl = new URL(baseApiUrl);
       
-      // Check if the base URL's pathname already contains the /api prefix.
-      // Examples:
-      // http://localhost:5000/api -> pathname is /api
-      // http://localhost:3000 -> pathname is /
-      if (baseUrl.pathname.startsWith('/api')) {
-        // If base URL is like '.../api', the path should be relative to that
-        relativeAuthPath = '/auth/clinic/auth0/login'; 
+      // The clinic auth0 login endpoint
+      const authPath = '/auth/clinic/auth0/login';
+      
+      // If the API URL already has a path (e.g. /api), we need to properly join them
+      let finalPath;
+      if (apiUrl.pathname === '/' || apiUrl.pathname === '') {
+        // If API URL has no specific path, we need to add /api prefix
+        finalPath = `/api${authPath}`;
+      } else {
+        // If API URL already has a path like /api, just append our auth path
+        // Remove trailing slash from pathname if it exists
+        const basePath = apiUrl.pathname.endsWith('/') 
+          ? apiUrl.pathname.slice(0, -1) 
+          : apiUrl.pathname;
+        finalPath = `${basePath}${authPath}`;
       }
       
-      // Construct the final URL ensuring no double slashes in path
-      const finalUrl = new URL(baseUrl.pathname.replace(/\/?$/, '') + relativeAuthPath, baseUrl.origin).toString();
-
+      // Set the new pathname and create the full URL
+      apiUrl.pathname = finalPath;
+      const finalUrl = apiUrl.toString();
+      
       console.log('Redirecting to Auth0 backend URL:', finalUrl);
       window.location.href = finalUrl;
-
     } catch (error) {
-      console.error('Error constructing backend URL:', error);
-      alert('Could not initiate login. Invalid API URL configuration.');
+      console.error('Error constructing Auth0 login URL:', error);
+      alert('Could not initiate OAuth login. Please try again or contact support.');
     }
   };
 
@@ -180,7 +188,10 @@ const Home = () => {
                     ) : (
                       <>
                         <Button variant="contained" color="secondary" onClick={handleClinicLogin} disabled={isClientAuthenticated}>
-                          Login / Sign Up
+                          Login
+                        </Button>
+                        <Button variant="outlined" color="secondary" onClick={handleClinicSignUp} sx={{ ml: 1 }} disabled={isClientAuthenticated}>
+                          Sign Up
                         </Button>
                       </>
                     )}
