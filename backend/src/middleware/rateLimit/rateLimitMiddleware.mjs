@@ -2,7 +2,9 @@
 
 import rateLimit from 'express-rate-limit';
 import RedisStore from 'rate-limit-redis';
-import config from '../../config/config.mjs';
+import loadAndValidateConfig from '../../config/config.mjs';
+// Call the function RIGHT AFTER importing it to define config
+const config = loadAndValidateConfig(); 
 
 /**
  * Middleware for rate limiting requests
@@ -58,8 +60,8 @@ const rateLimitMiddleware = {
    * API rate limiter
    */
   apiLimiter: rateLimit({
-    windowMs: config.security.rateLimit.windowMs || 5 * 60 * 1000, // 15 minutes
-    max: config.security.rateLimit.max || 100000, // 100 requests per windowMs
+    windowMs: config.security?.rateLimit?.windowMs || 5 * 60 * 1000, // 15 minutes
+    max: config.security?.rateLimit?.max || 100000, // 100 requests per windowMs
     message: {
       success: false,
       message: 'Too many requests, please try again later'

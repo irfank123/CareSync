@@ -51,7 +51,7 @@ const dataMiddleware = {
    * @param {Array} sensitiveFields - Fields to remove from responses
    * @returns {Function} Middleware function
    */
-  sanitizeResponse: (sensitiveFields = ['passwordHash', 'password', 'token']) => {
+  sanitizeResponse: (sensitiveFields = ['passwordHash', 'password']) => {
     return (req, res, next) => {
       // Store original json method
       const originalJson = res.json;
@@ -180,48 +180,72 @@ const dataMiddleware = {
     if (!obj || typeof obj !== 'object') {
       return obj;
     }
-    
+
     // Handle Date objects
     if (obj instanceof Date) {
       return new Date(obj);
     }
-    
+
     // Detect circular references
     if (seen.has(obj)) {
       return "[Circular Reference]";
     }
-    
-    // Add this object to seen map
     seen.set(obj, true);
-    
+
     // Handle arrays
     if (Array.isArray(obj)) {
       return obj.map(item => dataMiddleware._sanitizeObject(item, sensitiveFields, seen));
     }
-    
-    // Handle objects
+
+    // If it's a Mongoose document, convert it to a plain object first
+    let plainObj = obj;
+    let isAlreadyPlain = false; // Flag to avoid re-processing if obj was already plain
+
+    if (obj.constructor && obj.constructor.name === 'model' && typeof obj.toJSON === 'function') {
+        plainObj = obj.toJSON(); // Use Mongoose's toJSON
+        // Check if toJSON returned a non-object
+        if (!plainObj || typeof plainObj !== 'object') {
+            return plainObj; // Return the primitive value directly
+        }
+        // Re-check for circular reference after toJSON
+        if (seen.has(plainObj)) {
+             return "[Circular Reference after toJSON]";
+        }
+        seen.set(plainObj, true);
+    } else if (typeof obj.toJSON === 'function' && obj.constructor.name !== 'Object') {
+        // Handle other objects with a custom toJSON that aren't plain objects
+        plainObj = obj.toJSON();
+        // Check if toJSON returned a non-object
+        if (!plainObj || typeof plainObj !== 'object') {
+            return plainObj; // Return the primitive value directly
+        }
+        if (seen.has(plainObj)) {
+             return "[Circular Reference after toJSON]";
+        }
+        seen.set(plainObj, true);
+    } else {
+        // Original obj is used, not the result of toJSON
+        isAlreadyPlain = true;
+    }
+
+    // Now sanitize the plain object (plainObj)
     const sanitized = {};
-    
-    for (const key in obj) {
-      // Skip sensitive fields
+    // Ensure we iterate over the potentially transformed plainObj
+    for (const key in plainObj) {
+      // Ensure the key actually belongs to the object, not prototype
+      if (!Object.prototype.hasOwnProperty.call(plainObj, key)) {
+        continue;
+      }
+
       if (sensitiveFields.includes(key)) {
         continue;
       }
-      
-      try {
-        // Recursively sanitize nested objects
-        if (obj[key] && typeof obj[key] === 'object') {
-          sanitized[key] = dataMiddleware._sanitizeObject(obj[key], sensitiveFields, seen);
-        } else {
-          sanitized[key] = obj[key];
-        }
-      } catch (error) {
-        // If processing a specific field fails, skip it
-        console.error(`Error sanitizing field ${key}:`, error);
-        sanitized[key] = "[Error: Unable to sanitize]";
-      }
+
+      const value = plainObj[key];
+      // Pass the correct seen map instance
+      sanitized[key] = dataMiddleware._sanitizeObject(value, sensitiveFields, seen);
     }
-    
+
     return sanitized;
   },
   

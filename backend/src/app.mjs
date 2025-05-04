@@ -9,16 +9,25 @@ import mongoSanitize from 'express-mongo-sanitize';
 import xss from 'xss-clean';
 import hpp from 'hpp';
 import { v4 as uuidv4 } from 'uuid';
-import config from './config/config.mjs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import setupRoutes from './routes/index.mjs';
 import { errorMiddleware } from './middleware/index.mjs';
 import { AppServiceProvider } from './utils/di/serviceProviders.mjs';
 
+// Import the config loader function
+import loadAndValidateConfig from './config/config.mjs';
+
+// Helper to get __dirname in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 /**
  * Create and configure Express application
+ * @param {object} config - The loaded application configuration.
  * @returns {Object} Express app
  */
-const createApp = () => {
+const createApp = (config) => {
   const app = express();
   
   // Assign unique ID to each request for tracking
@@ -50,7 +59,7 @@ const createApp = () => {
   // CORS middleware
   app.use(cors({
     origin: config.cors.origin,
-    credentials: true, // Allow cookies to be included with requests
+    credentials: config.cors.credentials,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'Pragma', 'Expires']
   }));
@@ -131,15 +140,16 @@ const setupAppRoutes = (app) => {
 
 /**
  * Bootstrap the application
- * @returns {Object} Configured Express app
+ * @param {object} config - The loaded application configuration.
+ * @returns {Promise<object>} Configured Express app
  */
-const bootstrap = async () => {
+const bootstrap = async (config) => {
   try {
     // Initialize all services
     await AppServiceProvider.initializeAsync();
     
     // Create Express app
-    const app = createApp();
+    const app = createApp(config);
     
     // Setup routes
     setupAppRoutes(app);

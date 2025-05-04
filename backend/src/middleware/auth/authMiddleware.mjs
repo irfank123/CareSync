@@ -2,9 +2,12 @@
 
 import jwt from 'jsonwebtoken';
 import { User, Clinic } from '../../models/index.mjs';
-import config from '../../config/config.mjs';
+import loadAndValidateConfig from '../../config/config.mjs';
 import { AppError } from '../../utils/errorHandler.mjs';
 import tokenBlacklistService from '../../services/tokenBlacklistService.mjs';
+
+// Load the config
+const config = loadAndValidateConfig();
 
 /**
  * Authentication middleware to protect routes
@@ -136,22 +139,30 @@ const authMiddleware = {
         req.user = user;
         req.userRole = user.role;
         req.userType = 'user';
-        
-        // If this is a clinic admin, add clinic information
-        if (user.role === 'admin' && decoded.clinicId) {
-          req.isClinicAdmin = true;
-          req.clinicId = decoded.clinicId;
-          
-          // Fetch clinic data
-          try {
-            const clinic = await Clinic.findById(decoded.clinicId);
-            if (clinic) {
-              req.clinic = clinic;
-            }
-          } catch (clinicError) {
-            console.error('Error fetching clinic data:', clinicError);
-            // Continue authentication even if clinic fetch fails
-          }
+
+        // If this user is an admin, check their DB record for clinicId
+        if (user.role === 'admin' && user.clinicId) {
+           req.isClinicAdmin = true;
+           req.clinicId = user.clinicId;
+
+           // Fetch clinic data using ID from DB
+           try {
+             const clinic = await Clinic.findById(user.clinicId);
+             if (clinic && clinic.isActive) {
+               req.clinic = clinic;
+             } else {
+                console.warn(`Clinic not found or inactive for clinicId ${user.clinicId} in DB.`);
+                req.clinic = null;
+             }
+           } catch (clinicError) {
+             console.error('Error fetching clinic data during auth:', clinicError);
+             req.clinic = null;
+           }
+        } else {
+            // Not a clinic admin or no clinicId in DB record
+            req.isClinicAdmin = false;
+            req.clinicId = undefined;
+            req.clinic = null;
         }
         
         // Add auth context for logging

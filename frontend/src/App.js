@@ -41,6 +41,29 @@ import { ClinicAuthProvider } from './context/ClinicAuthContext';
 import AuthWrapper from './components/auth/AuthWrapper'; // Make sure this file exists
 
 function App() {
+  // Add explicit Auth0 redirect handler 
+  React.useEffect(() => {
+    const handleAuthRedirects = () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const authStatus = urlParams.get('auth');
+      const user = urlParams.get('user');
+      
+      if (authStatus) {
+        console.log(`[App] Auth redirect detected: status=${authStatus}, user=${user || 'unknown'}`);
+        
+        // If we're not on the right page after auth, redirect explicitly
+        if (authStatus === 'success' || authStatus === 'code_reuse') {
+          if (!window.location.pathname.includes('/clinic-dashboard')) {
+            console.log('[App] Redirecting to clinic dashboard after auth detection');
+            window.location.href = '/clinic-dashboard' + window.location.search;
+          }
+        }
+      }
+    };
+    
+    handleAuthRedirects();
+  }, []);
+  
   return (
     <Router>
       <ThemeProvider theme={theme}>

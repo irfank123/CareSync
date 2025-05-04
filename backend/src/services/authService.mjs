@@ -4,7 +4,10 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
-import config from '../config/config.mjs';
+import loadAndValidateConfig from '../config/config.mjs';
+
+// Load the config
+const config = loadAndValidateConfig();
 
 /**
  * Unified Authentication Service for all user types

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { safeObjectId } from '../utils/stringUtils';
 import Cookies from 'js-cookie';
+import { toast } from 'react-toastify';
 
 // Validate environment variables
 if (!process.env.REACT_APP_API_URL) {
@@ -22,26 +23,39 @@ export const axiosInstance = api;
 // Add request interceptor for token
 api.interceptors.request.use(
   (config) => {
-    // First check for token in localStorage (for regular users)
-    const token = localStorage.getItem('token');
+    let token = null;
+    const url = config.url || '';
+
+    // Log original request details
+    console.log(`[Interceptor] Preparing request to: ${url}`);
+
+    // Determine which token to use based on the request URL
+    if (url.startsWith('/auth/clinic') || url.startsWith('/google/auth') || url.startsWith('/clinics')) {
+      // For clinic-related routes, ONLY check cookies
+      try {
+        token = Cookies.get('token');
+        console.log('[Interceptor] Using Cookie token for clinic route:', token ? 'Found token: ' + token.substring(0, 10) + '...' : 'Not Found');
+      } catch (error) {
+        console.error('[Interceptor] Error accessing cookie token:', error);
+      }
+    } else {
+      // For all other routes, check localStorage first (standard user auth)
+      token = localStorage.getItem('token');
+      console.log('[Interceptor] Using localStorage token for non-clinic route:', token ? 'Found token: ' + token.substring(0, 10) + '...' : 'Not Found');
+    }
+
+    // If a token was found, add it to the header
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
-      return config;
-    }
-    
-    // If no token in localStorage, try to get from cookies (for clinic users)
-    try {
-      const cookieToken = Cookies.get('token');
-      if (cookieToken) {
-        config.headers.Authorization = `Bearer ${cookieToken}`;
-      }
-    } catch (error) {
-      console.error('Error accessing cookie token:', error);
+      console.log('[Interceptor] Attaching Authorization header.');
+    } else {
+       console.log('[Interceptor] No token found, Authorization header not set.');
     }
     
     return config;
   },
   (error) => {
+    console.error('[Interceptor] Request error:', error);
     return Promise.reject(error);
   }
 );
@@ -99,6 +113,11 @@ export const authService = {
       const response = await api.post('/auth/login', loginData);
       console.log('Login response received:', response.data);
       if (response.data.token) {
+        // Clear any existing auth tokens in cookies to prevent conflicts with Auth0
+        Cookies.remove('token', { path: '/' });
+        Cookies.remove('auth_debug', { path: '/' });
+        
+        // Store token in localStorage for regular user authentication
         localStorage.setItem('token', response.data.token);
         localStorage.setItem('user', JSON.stringify(response.data.user));
       }

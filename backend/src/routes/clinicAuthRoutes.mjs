@@ -23,7 +23,7 @@ import {
 import { 
   authMiddleware, 
   auditMiddleware,
-  rateLimitMiddleware 
+  rateLimitMiddleware
 } from '../middleware/index.mjs';
 
 const router = express.Router();
@@ -69,23 +69,20 @@ router.put(
 // Route to initiate Auth0 login/signup for clinics
 router.get(
   '/auth0/login',
-  // No specific validation needed here, redirects to Auth0
-  // Consider adding specific rate limiting if needed
-  auditMiddleware.logAuth('clinic-auth0-initiate'), 
+  auditMiddleware.logAuth('clinic-auth0-initiate'),
   initiateClinicAuth0LoginWithDI
 );
 
 // Route for Auth0 callback
 router.get(
-  '/auth0/callback',
-  // No specific validation needed here, handles Auth0 response
-  auditMiddleware.logAuth('clinic-auth0-callback'), 
+  '/clinic-auth0-return',
+  // auditMiddleware.logAuth('clinic-auth0-callback'), // Keep commented out for now
   handleClinicAuth0CallbackWithDI
 );
 
 // Protected routes
-router.use(authMiddleware.authenticate); // All routes below this line require authentication
-router.use(authMiddleware.checkClinicStatus); // Ensure clinic status is checked
+router.use(authMiddleware.authenticate);
+router.use(authMiddleware.checkClinicStatus);
 
 router.get(
   '/me',

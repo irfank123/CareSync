@@ -22,7 +22,10 @@ const UserSchema = new mongoose.Schema(
     },
     passwordHash: {
       type: String,
-      required: [true, 'Please add a password'],
+      required: function() {
+        // Only require password if auth0Id is not present
+        return !this.auth0Id;
+      },
       minlength: [8, 'Password must be at least 8 characters'],
       select: false,
     },
@@ -49,9 +52,9 @@ const UserSchema = new mongoose.Schema(
     },
     phoneNumber: {
       type: String,
-      required: [true, 'Please add a phone number'],
+      required: false,
       match: [
-        /^\+?[1-9]\d{9,14}$/, 
+        /^\+?[1-9]\d{9,14}$/,
         'Please add a valid phone number'
       ]
     },
@@ -128,6 +131,10 @@ const UserSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    googleRefreshToken: {
+      type: String,
+      select: false // Hide from default query results for security
+    },
     privacyAcceptedAt: Date,
     preferences: {
       theme: {
@@ -172,6 +179,12 @@ UserSchema.index({ email: 1, isActive: 1 });
 
 //passsword encryption 
 UserSchema.pre('save', async function(next) {
+  // Skip password validation and hashing for Auth0 users
+  if (this.auth0Id && !this.passwordHash) {
+    // For Auth0 users, we don't need a password - Auth0 handles authentication
+    return next();
+  }
+
   // hash new or modified password
   if (!this.isModified('passwordHash')) {
     return next();

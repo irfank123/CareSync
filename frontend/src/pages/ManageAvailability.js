@@ -93,37 +93,37 @@ const ManageAvailability = () => {
 
   // Fetch existing availability for the selected date
   const fetchAvailability = async (forceRefresh = false) => {
-    if (!doctorId) return;
+      if (!doctorId) return;
     
     const currentFetchTime = Date.now();
     latestFetchRequestTime.current = currentFetchTime;
-    
-    try {
-      setLoading(true);
-      setError(null); // Clear previous errors
       
-      const formattedDate = format(selectedDate, 'yyyy-MM-dd');
+      try {
+        setLoading(true);
+      setError(null); // Clear previous errors
+        
+        const formattedDate = format(selectedDate, 'yyyy-MM-dd');
       const cacheBuster = forceRefresh ? `&_=${Date.now()}` : ''; // Use standard cache busting query param
       const url = `${API_BASE_URL}/availability/doctor/${doctorId}/slots?startDate=${formattedDate}&endDate=${formattedDate}${cacheBuster}`;
       
       console.log('GET Request - Fetch Availability:', { url });
-
+        
       const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          ...getAuthHeaders(),
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        },
+          method: 'GET',
+            headers: {
+              ...getAuthHeaders(),
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache',
+              'Expires': '0'
+            },
       });
-      
-      if (!response.ok) {
+        
+        if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: 'Failed to parse error response' }));
         throw new Error(errorData?.message || `HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
+        }
+        
+        const data = await response.json();
       
       // Only update state if this is the latest fetch request
       if (latestFetchRequestTime.current === currentFetchTime) {
@@ -132,20 +132,20 @@ const ManageAvailability = () => {
       } else {
         console.log('Skipping state update for stale fetch request.');
       }
-    } catch (err) {
+      } catch (err) {
       console.error('Fetch availability error:', err);
       // Only update error state if this is the latest fetch request
       if (latestFetchRequestTime.current === currentFetchTime) {
         setError(err.message || 'Failed to fetch availability');
         setTimeSlots([]); // Clear slots on error
       }
-    } finally {
+      } finally {
       // Only turn off loading if this is the latest request completing
       if (latestFetchRequestTime.current === currentFetchTime) {
         setLoading(false);
       }
-    }
-  };
+      }
+    };
 
   useEffect(() => {
     if (doctorId) {
@@ -192,7 +192,7 @@ const ManageAvailability = () => {
       setError('Doctor ID not available');
       return;
     }
-    
+
     try {
       setLoading(true);
       setError(null);

@@ -1,35 +1,39 @@
-import { check, validationResult } from 'express-validator';
+import { validationResult, check } from 'express-validator';
 import { withServicesForController } from '../utils/controllerHelper.mjs';
+import { formatValidationErrors } from '../utils/errorHandler.mjs';
 
 /**
- * @desc    Create a new clinic profile
+ * @desc    Create a new clinic profile for the logged-in user
  * @route   POST /api/clinics
- * @access  Private (Authenticated Admin User without a clinic)
+ * @access  Private (Admin user without a clinic)
  */
 const createClinic = async (req, res, next, { clinicService }) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ success: false, errors: errors.array() });
-  }
-
+  // Validation would happen via middleware before this
   try {
-    // Authorization is handled by middleware (authMiddleware.authorizeClinicAdminCreation)
-    const userId = req.user._id;
+    // TODO: Add validation checks if not done via middleware
+
+    // The authenticated user ID should be available from authMiddleware
+    const userId = req.user._id; 
     const clinicData = req.body;
 
-    // Call service to create clinic and link user
-    const { clinic, user } = await clinicService.createClinicAndLinkAdmin(userId, clinicData);
+    console.log(`[DEBUG] Attempting to create clinic for user ${userId}`);
+
+    const { clinic, user } = await clinicService.createClinicAndLinkUser(userId, clinicData);
 
     res.status(201).json({
       success: true,
       message: 'Clinic created successfully',
-      clinic,
-      user // Send back updated user potentially?
+      data: { clinic, user } // Return updated user and clinic data
     });
 
   } catch (error) {
     console.error('Create clinic error:', error);
-    res.status(500).json({ success: false, message: error.message || 'Failed to create clinic' });
+    // Use next to pass error to global handler, or send specific response
+    res.status(error.statusCode || 400).json({
+      success: false,
+      message: error.message || 'Failed to create clinic'
+    });
+    // next(error); // Alternative: use global error handler
   }
 };
 
@@ -45,22 +49,24 @@ export const createClinicValidation = [
   // Add validation for other fields as needed
 ];
 
-// --- Controller Object and DI --- //
+// Controller methods object
 const clinicController = {
   createClinic,
-  // Add other controller methods (getClinic, updateClinic etc.) later
+  // TODO: Add other clinic operations (get, update, etc.) later
 };
 
+// Service dependencies for each method
 const dependencies = {
-  createClinic: ['clinicService'], // Requires a clinic service
-  // Define dependencies for other methods
+  createClinic: ['clinicService'],
 };
 
+// Apply DI to the controller
 const enhancedController = withServicesForController(clinicController, dependencies);
 
-export const { 
+// Export individual methods with DI
+export const {
   createClinic: createClinicWithDI,
-  // Export other methods
 } = enhancedController;
 
+// Default export (optional)
 export default enhancedController; 

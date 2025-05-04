@@ -1319,17 +1319,17 @@ async syncWithGoogleCalendar(doctorId, refreshToken, startDate, endDate, userId)
     const session = await mongoose.startSession();
     session.startTransaction();
     console.log(`[generateStandardTimeSlots] Transaction started for doctor ${doctorId}`);
-
+    
     try {
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         throw new Error('Doctor not found');
       }
-
+      
       const start = startDate || new Date();
       const end = endDate || new Date(start);
       console.log(`[generateStandardTimeSlots] Date range: ${start.toISOString()} to ${end.toISOString()}`);
-
+      
       // --- Deletion Phase ---
       console.log(`[generateStandardTimeSlots] Starting deletion phase...`);
       for (let day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
@@ -1341,7 +1341,7 @@ async syncWithGoogleCalendar(doctorId, refreshToken, startDate, endDate, userId)
         nextDayStart.setUTCDate(targetDayStart.getUTCDate() + 1); // Start of the next day in UTC
 
         console.log(`[generateStandardTimeSlots] Processing deletion for date range: ${targetDayStart.toISOString()} to ${nextDayStart.toISOString()}`);
-
+          
         // Query for slots within the entire day
         const deleteQuery = {
           doctorId,
@@ -1361,12 +1361,12 @@ async syncWithGoogleCalendar(doctorId, refreshToken, startDate, endDate, userId)
             action: 'delete',
             resource: 'timeslot',
             details: {
-              doctorId,
+            doctorId,
               date: targetDayStart.toISOString().split('T')[0], // Log the date string
               count: deleteResult.deletedCount,
               reason: 'regenerate-slots-delete-all'
             }
-          }], { session });
+            }], { session });
           console.log(`[generateStandardTimeSlots] Audit log created for deletion of ${deleteResult.deletedCount} slots.`);
         }
       }
@@ -1392,17 +1392,17 @@ async syncWithGoogleCalendar(doctorId, refreshToken, startDate, endDate, userId)
           slotStart.setHours(range.startHour, 0, 0, 0);
           const rangeEnd = new Date(currentDate);
           rangeEnd.setHours(range.endHour, 0, 0, 0);
-
+        
           console.log(`[generateStandardTimeSlots] Processing range ${range.startHour}:00 to ${range.endHour}:00`);
 
           while (slotStart.getTime() + appointmentDuration * 60000 <= rangeEnd.getTime()) {
-            const slotEndTime = new Date(slotStart.getTime() + appointmentDuration * 60000);
+          const slotEndTime = new Date(slotStart.getTime() + appointmentDuration * 60000);
             const formattedStartTime = `${String(slotStart.getHours()).padStart(2, '0')}:${String(slotStart.getMinutes()).padStart(2, '0')}`;
             const formattedEndTime = `${String(slotEndTime.getHours()).padStart(2, '0')}:${String(slotEndTime.getMinutes()).padStart(2, '0')}`;
-
+          
             // Check overlap ONLY against BOOKED slots
             const bookedOverlapQuery = {
-              doctorId,
+            doctorId,
               date: dateForOverlapCheck,
               status: 'booked',
               $or: [
@@ -1415,11 +1415,11 @@ async syncWithGoogleCalendar(doctorId, refreshToken, startDate, endDate, userId)
             if (!bookedOverlappingSlot) {
               console.log(`[generateStandardTimeSlots] Creating slot: ${formattedStartTime} - ${formattedEndTime}`);
               const newSlotData = {
-                doctorId,
+              doctorId,
                 date: new Date(currentDate), // Use the non-normalized date for storage
-                startTime: formattedStartTime,
-                endTime: formattedEndTime,
-                status: 'available'
+              startTime: formattedStartTime,
+              endTime: formattedEndTime,
+              status: 'available'
               };
               const newSlotResult = await TimeSlot.create([newSlotData], { session });
               if (newSlotResult && newSlotResult.length > 0) {
@@ -1431,34 +1431,34 @@ async syncWithGoogleCalendar(doctorId, refreshToken, startDate, endDate, userId)
             } else {
               console.log(`[generateStandardTimeSlots] Skipping slot ${formattedStartTime}-${formattedEndTime} due to overlap with booked slot ID: ${bookedOverlappingSlot._id}`);
             }
-            slotStart.setTime(slotStart.getTime() + appointmentDuration * 60000);
-          }
+          slotStart.setTime(slotStart.getTime() + appointmentDuration * 60000);
         }
       }
+      }
       console.log(`[generateStandardTimeSlots] Creation phase completed. ${generatedSlots.length} slots generated.`);
-
+      
       // --- Audit Log for Creation ---
       if (generatedSlots.length > 0) {
-        await AuditLog.create([{
-          userId: userId || doctorId,
-          action: 'create',
-          resource: 'timeslot',
-          details: {
-            doctorId,
-            startDate: start,
-            endDate: end,
+      await AuditLog.create([{
+        userId: userId || doctorId,
+        action: 'create',
+        resource: 'timeslot',
+        details: {
+          doctorId,
+          startDate: start,
+          endDate: end,
             slotsGenerated: generatedSlots.length,
             reason: 'regenerate-slots'
-          }
-        }], { session });
+        }
+      }], { session });
         console.log(`[generateStandardTimeSlots] Audit log created for generation of ${generatedSlots.length} slots.`);
       }
-
+      
       // --- Commit ---
       console.log(`[generateStandardTimeSlots] Attempting to commit transaction...`);
       await session.commitTransaction();
       console.log(`[generateStandardTimeSlots] Transaction committed successfully.`);
-
+      
       const plainGeneratedSlots = generatedSlots.map(slot => slot.toObject());
       return plainGeneratedSlots;
     } catch (error) {

@@ -1,7 +1,9 @@
 // src/services/emailService.mjs
 
-import config from '../config/config.mjs';
 import nodemailer from 'nodemailer';
+import loadAndValidateConfig from '../config/config.mjs';
+const config = loadAndValidateConfig();
+
 import {
   welcomeTemplate,
   verificationTemplate,
@@ -18,6 +20,7 @@ import {
 class EmailService {
   constructor() {
     this.from = config.email.from;
+    this.frontendUrl = config.frontendUrl;
     this.initialized = false;
     this.emailQueue = [];
     
@@ -261,7 +264,7 @@ class EmailService {
       appointment,
       patient,
       doctor,
-      frontendUrl: config.frontendUrl
+      frontendUrl: this.frontendUrl
     });
     
     return this.sendEmail({
@@ -286,7 +289,7 @@ class EmailService {
       clinicName: clinic.name,
       status,
       notes,
-      frontendUrl: config.frontendUrl
+      frontendUrl: this.frontendUrl
     });
     
     // Set subject based on status
@@ -331,7 +334,7 @@ class EmailService {
       firstName,
       role,
       roleText,
-      frontendUrl: config.frontendUrl
+      frontendUrl: this.frontendUrl
     });
     
     return this.sendEmail({
@@ -356,7 +359,7 @@ class EmailService {
       appointment,
       patient,
       doctor,
-      frontendUrl: config.frontendUrl
+      frontendUrl: this.frontendUrl
     });
     
     return this.sendEmail({

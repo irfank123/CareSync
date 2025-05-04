@@ -31,8 +31,8 @@ if (missingConfig.length > 0) {
 
 // Default callback URL for development
 const defaultCallbackUrl = process.env.FRONTEND_URL 
-  ? `${process.env.FRONTEND_URL}/auth/clinic/auth0/callback` 
-  : 'http://localhost:5000/api/auth/clinic/auth0/callback';
+  ? `${process.env.FRONTEND_URL}/auth/clinic/clinic-auth0-return`
+  : 'http://localhost:5001/api/auth/clinic/clinic-auth0-return';
 
 // Provide actual values or clear placeholders
 const auth0Config = {

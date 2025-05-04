@@ -13,10 +13,11 @@ import {
   Snackbar
 } from '@mui/material';
 import { toast } from 'react-toastify';
-import { authService } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
   const navigate = useNavigate();
+  const { login, isAuthenticated, user } = useAuth();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -33,6 +34,23 @@ const Login = () => {
   useEffect(() => {
     setErrorMessage('');
   }, [formData]);
+
+  // Check if already authenticated
+  useEffect(() => {
+    console.log('[Login] Auth state check:', { isAuthenticated, user });
+    if (isAuthenticated && user) {
+      console.log('[Login] Already authenticated, redirecting to dashboard');
+      
+      // Redirect based on user role
+      if (user.role === 'doctor') {
+        navigate('/doctor-dashboard');
+      } else if (user.role === 'patient') {
+        navigate('/dashboard');
+      } else {
+        navigate('/');
+      }
+    }
+  }, [isAuthenticated, user, navigate]);
 
   const validateForm = () => {
     const newErrors = {};
@@ -63,21 +81,34 @@ const Login = () => {
         await new Promise(resolve => setTimeout(resolve, delay));
       }
 
-      const response = await authService.login({
+      console.log('[Login] Submitting login form:', { 
+        email: formData.email, 
+        passwordLength: formData.password?.length,
+        mfaRequired
+      });
+
+      // Use the context login function instead of direct API call
+      const result = await login({
         email: formData.email,
         password: formData.password,
         ...(mfaRequired && { mfaCode: formData.mfaCode })
       });
       
-      if (response.success) {
-        toast.success('Login successful!');
-        navigate('/dashboard');
-      } else if (response.requiresMfa && !mfaRequired) {
+      console.log('[Login] Login result:', result);
+      
+      if (result.success) {
+        // Context will handle navigation and state updates
+        console.log('[Login] Login successful');
+      } else if (result.requiresMfa && !mfaRequired) {
         setMfaRequired(true);
         setMfaCodeSent(true);
         toast.info('MFA code has been sent to your email');
+      } else if (result.error) {
+        setErrorMessage(result.error);
+        toast.error(result.error);
       }
     } catch (error) {
+      console.error('[Login] Error during login:', error);
       setLoginAttempts(prev => prev + 1);
       
       if (error.response) {

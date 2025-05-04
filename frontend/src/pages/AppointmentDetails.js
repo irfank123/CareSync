@@ -33,10 +33,12 @@ import {
   Schedule,
   Place,
   Info,
+  VideoCall,
 } from '@mui/icons-material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { API_BASE_URL } from '../config';
 import AssessmentReport from '../components/assessment/AssessmentReport';
+import AppointmentMeetingLink from '../components/appointments/AppointmentMeetingLink';
 import axios from 'axios';
 import { Link as RouterLink } from 'react-router-dom';
 import { format, parseISO } from 'date-fns';
@@ -1069,6 +1071,19 @@ const AppointmentDetails = () => {
                 {assessmentError}
               </Typography>
             </Paper>
+          )}
+
+          {/* Add Meeting Link Section - Only show for virtual appointments */}
+          {appointment.isVirtual && (
+            <>
+              <Divider sx={{ my: 2 }} />
+              <AppointmentMeetingLink 
+                appointment={appointment}
+                onMeetingLinkGenerated={(updatedAppointment) => {
+                  setAppointment(updatedAppointment);
+                }}
+              />
+            </>
           )}
 
           {/* Dialogs */}

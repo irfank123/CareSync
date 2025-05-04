@@ -1,7 +1,11 @@
 // src/server.mjs
+import dotenv from 'dotenv';
+dotenv.config(); // <-- Load .env variables FIRST
 
 import mongoose from 'mongoose';
-import config from './config/config.mjs';
+import loadAndValidateConfig from './config/config.mjs';
+const config = loadAndValidateConfig();
+
 import { bootstrap } from './app.mjs';
 import clinicAuthService from './services/clinicAuthService.mjs';
 import clinicAuth0Service from './services/clinicAuth0Service.mjs';
@@ -9,6 +13,7 @@ import clinicService from './services/clinicService.mjs';
 import clinicRoutes from './routes/clinicRoutes.mjs';
 import authRoutes from './routes/authRoutes.mjs';
 import clinicAuthRoutes from './routes/clinicAuthRoutes.mjs';
+import googleRoutes from './routes/googleRoutes.mjs';
 import AppServiceProvider from './utils/di/serviceProviders.mjs';
 
 /**
@@ -83,9 +88,10 @@ const setupErrorHandlers = (server) => {
   
   // Handle termination signals
   ['SIGTERM', 'SIGINT'].forEach(signal => {
+    console.log(`Attaching listener for ${signal}`);
     process.on(signal, () => {
-      console.log(`${signal} signal received`);
-      gracefulShutdown(server, signal);
+      console.log(`${signal} listener explicitly fired! Exiting immediately.`);
+      process.exit(0);
     });
   });
 };
@@ -106,17 +112,19 @@ const gracefulShutdown = (server, reason, immediate = false) => {
   
   // Close server and disconnect from database
   server.close(() => {
-    console.log('HTTP server closed');
+    console.log('HTTP server closed callback entered.');
     
     mongoose.connection.close(false)
       .then(() => {
-        console.log('MongoDB connection closed');
+        console.log('MongoDB connection closed successfully.');
         process.exit(0);
       })
       .catch(err => {
         console.error('Error closing MongoDB connection:', err);
+        console.log('Exiting due to DB close error.');
         process.exit(1);
       });
+    console.log('mongoose.connection.close() called.');
     
     // Force exit after timeout if graceful shutdown fails
     setTimeout(() => {
@@ -135,7 +143,7 @@ const startApp = async () => {
     await connectDB();
     
     // Bootstrap the application (sets up core middleware)
-    const app = await bootstrap();
+    const app = await bootstrap(config);
     
     // --- Initialize services via Service Provider ---
     // This step ensures all services are registered and async ones are ready.
@@ -160,6 +168,7 @@ const startApp = async () => {
     app.use('/api/auth', authRoutes);
     app.use('/api/auth/clinic', clinicAuthRoutes);
     app.use('/api/clinics', clinicRoutes);
+    app.use('/api/google', googleRoutes);
     // TODO: Mount other resource routers
 
     // --- Global Error Handler --- 

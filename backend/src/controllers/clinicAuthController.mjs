@@ -3,7 +3,10 @@
 import { check, validationResult } from 'express-validator';
 import { withServices, withServicesForController } from '../utils/controllerHelper.mjs';
 import { formatValidationErrors } from '../utils/errorHandler.mjs';
-import config from '../config/config.mjs'; // Import config for frontend URL
+import loadAndValidateConfig from '../config/config.mjs'; // Import the config loader function
+
+// Load the config
+const config = loadAndValidateConfig();
 
 /**
  * @desc    Register new clinic
@@ -177,13 +180,20 @@ const submitVerification = async (req, res, next, { clinicAuthService }) => {
  */
 const getClinicProfile = async (req, res, next, { clinicAuthService }) => {
   try {
-    const clinic = clinicAuthService.sanitizeClinicData(req.clinic);
-    
+    // Use req.clinic directly (it might be null if not found/linked)
+    const clinicData = req.clinic ? clinicAuthService.sanitizeClinicData(req.clinic) : null;
+    const userData = req.user ? clinicAuthService.sanitizeUserData(req.user) : null;
+
+    if (!userData) {
+       // Should be caught by authenticate middleware, but belts and braces
+       return res.status(401).json({ success: false, message: 'User not authenticated' });
+    }
+
     res.status(200).json({ 
       success: true, 
-      clinic,
-      user: req.user ? clinicAuthService.sanitizeUserData(req.user) : null,
-      userType: 'clinic'
+      clinic: clinicData, // Send clinic data or null
+      user: userData,
+      userType: req.userType || 'user' // Use userType set during authentication
     });
   } catch (error) {
     console.error('Get clinic profile error:', error);
@@ -385,12 +395,20 @@ const initiateClinicAuth0Login = async (req, res, next, { clinicAuth0Service }) 
  * @access  Public
  */
 const handleClinicAuth0Callback = async (req, res, next, { clinicAuth0Service }) => {
-  const { code, error, error_description } = req.query;
+  console.log('[DEBUG] Entering handleClinicAuth0Callback controller');
+  const { code, error, error_description, state } = req.query;
+
+  // Log the full URL to help debug redirect and callback issues
+  const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+  console.log('[DEBUG] Full callback URL:', fullUrl);
 
   console.log('Auth0 callback received:', {
     hasCode: !!code,
+    codeLength: code?.length || 0,
+    hasState: !!state,
     error: error || 'none',
     path: req.path,
+    originalUrl: req.originalUrl,
     headers: {
       host: req.headers.host,
       referer: req.headers.referer
@@ -410,7 +428,10 @@ const handleClinicAuth0Callback = async (req, res, next, { clinicAuth0Service })
 
   try {
     console.log('Processing Auth0 callback with code:', code.substring(0, 5) + '...');
-    const { user, clinic, token } = await clinicAuth0Service.handleCallback(code);
+    
+    // Pass the full request URL as a potential redirectUri backup
+    const { user, clinic, token } = await clinicAuth0Service.handleCallback(code, fullUrl);
+    console.log('[DEBUG] Successfully processed handleCallback service call');
     
     if (!token) {
       console.error('No token generated after Auth0 callback processing');
@@ -444,11 +465,27 @@ const handleClinicAuth0Callback = async (req, res, next, { clinicAuth0Service })
     
     console.log('Auth0 authentication successful, cookies set, redirecting to dashboard');
     
+    // Create a more explicit success URL with timestamp and user info
+    const successRedirectUrl = `${config.frontendUrl}/clinic-dashboard?auth=success&ts=${Date.now()}&user=${encodeURIComponent(user.email)}`;
+    console.log(`[DEBUG] Attempting redirect to: ${successRedirectUrl}`);
+    
     // Redirect to the frontend dashboard with success param
-    res.redirect(`${config.frontendUrl}/clinic-dashboard?auth=success`);
+    res.redirect(successRedirectUrl);
+    console.log('[DEBUG] res.redirect called.'); // Log after calling redirect
     
   } catch (error) {
     console.error('Auth0 callback processing error:', error);
+    console.log('[DEBUG] Caught error during callback processing, redirecting to error page.');
+    
+    // Check if this is a special error about code reuse
+    if (error.message && error.message.includes('Code reuse detected')) {
+      console.log('[DEBUG] Code reuse detected - this may be a refresh or back-button navigation');
+      
+      // Redirect to success path since the user might already be authenticated
+      // but add a query param to indicate this was a reused code
+      return res.redirect(`${config.frontendUrl}/clinic-dashboard?auth=code_reuse`);
+    }
+    
     // Redirect to a frontend error page with detailed error
     const errorMessage = error.message || 'Login failed';
     console.error('Redirecting to error page with message:', errorMessage);

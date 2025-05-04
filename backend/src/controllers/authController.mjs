@@ -5,8 +5,11 @@ import { validationResult } from 'express-validator';
 import { check } from 'express-validator';
 import { withServices, withServicesForController } from '../utils/controllerHelper.mjs';
 import { AppError, formatValidationErrors } from '../utils/errorHandler.mjs';
-import config from '../config/config.mjs';
+import loadAndValidateConfig from '../config/config.mjs';
 import { AuditLog } from '../models/index.mjs';
+
+// Load the config
+const config = loadAndValidateConfig();
 
 /**
  * @desc    Register new user

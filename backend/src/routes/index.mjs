@@ -15,6 +15,8 @@ import assessmentRoutes from './assessmentRoutes.mjs';
 // import systemSettingsRoutes from './systemSettingsRoutes.mjs'; // Removed
 // import dashboardRoutes from './dashboardRoutes.mjs'; // Removed
 import prescriptionRoutes from './prescriptionRoutes.mjs';
+import googleRoutes from './googleRoutes.mjs';
+import clinicRoutes from './clinicRoutes.mjs';
 import { 
   errorMiddleware, 
   rateLimitMiddleware,
@@ -35,11 +37,14 @@ const setupRoutes = (app) => {
   // Apply rate limiting to all API routes
   apiRouter.use(rateLimitMiddleware.apiLimiter);
   
+  // Clinic auth routes (Mount more specific path first)
+  apiRouter.use('/auth/clinic', clinicAuthRoutes);
+  
   // Auth routes
   apiRouter.use('/auth', authRoutes);
   
-  // Clinic auth routes
-  apiRouter.use('/auth/clinic', clinicAuthRoutes);
+  // Clinic routes (for general clinic operations)
+  apiRouter.use('/clinics', clinicRoutes);
   
   // Admin routes
   apiRouter.use('/admin', adminRoutes);
@@ -72,6 +77,9 @@ const setupRoutes = (app) => {
   if (process.env.NODE_ENV === 'development') {
     apiRouter.use('/test', testRoutes);
   }
+  
+  // Google routes
+  apiRouter.use('/google', googleRoutes);
   
   // Mount API router at /api
   app.use('/api', apiRouter);

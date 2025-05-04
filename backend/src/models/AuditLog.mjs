@@ -20,6 +20,8 @@ const AuditLogSchema = new mongoose.Schema(
         'user', 
         'patient', 
         'doctor', 
+        'clinic',
+        'clinic-profile',
         'appointment', 
         'availability',
         'assessment',

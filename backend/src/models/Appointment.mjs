@@ -85,7 +85,16 @@ const AppointmentSchema = new mongoose.Schema(
         type: String,
         enum: ['sent', 'delivered', 'failed']
       }
-    }]
+    }],
+    googleMeetLink: {
+      type: String,
+      trim: true
+    },
+    googleEventId: {
+      type: String,
+      trim: true,
+      index: true
+    }
   },
   {
     timestamps: true,

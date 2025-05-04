@@ -660,7 +660,10 @@ async createAppointment(appointmentData, userId) {
       reasonForVisit: appointmentData.reasonForVisit,
       preliminaryAssessmentId: assessmentId, // Will be null initially
       isVirtual: appointmentData.isVirtual !== false,
-      videoConferenceLink: appointmentData.isVirtual ? this._generateVideoLink() : null
+      videoConferenceLink: null,
+      googleMeetLink: null,
+      googleEventId: null,
+      createdBy: appointmentData.createdBy
     }], { session });
     
     // DO NOT Update assessment here - it's handled in the main createAppointment flow
@@ -724,17 +727,6 @@ async createAppointment(appointmentData, userId) {
   }
   
   /**
-   * Generate a unique video conference link
-   * @returns {string} Video conference link
-   * @private
-   */
-  _generateVideoLink() {
-    const baseUrl = config.frontendUrl || 'http://localhost:3000';
-    const uniqueId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-    return `${baseUrl}/consultation/${uniqueId}`;
-  }
-  
-  /**
    * Update appointment
    * @param {string} appointmentId - Appointment ID
    * @param {Object} updateData - Data to update
@@ -780,7 +772,15 @@ async createAppointment(appointmentData, userId) {
       
       // Update videoConferenceLink based on isVirtual change if needed
       if (updateData.isVirtual !== undefined && updateData.isVirtual !== appointment.isVirtual) {
-        updateObj.videoConferenceLink = updateData.isVirtual ? this._generateVideoLink() : null;
+        // Don't generate a video link here, we'll use Google Meet integration instead
+        if (updateData.isVirtual) {
+          console.log('Appointment changed to virtual, video link will be generated via Google Calendar API');
+          // videoConferenceLink will be set when doctor uses the generateMeetingLink endpoint
+        } else {
+          updateObj.videoConferenceLink = null;
+          updateObj.googleMeetLink = null;
+          updateObj.googleEventId = null;
+        }
       }
       
       // Handle time slot changes

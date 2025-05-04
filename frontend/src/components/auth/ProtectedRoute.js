@@ -12,7 +12,7 @@ const ProtectedRoute = ({ children, roles }) => {
     isAuthenticated,
     userRole: user?.role,
     requiredRoles: roles,
-    user
+    user: user ? `${user.firstName} ${user.lastName} (${user.email})` : null
   });
 
   if (loading) {
@@ -28,22 +28,35 @@ const ProtectedRoute = ({ children, roles }) => {
     );
   }
 
-  // Check if user is authenticated
+  // Check if user is authenticated with regular auth (not clinic auth)
   if (!isAuthenticated) {
     console.log('User not authenticated, redirecting to login');
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Check if route requires specific roles
-  if (roles && !roles.includes(user?.role)) {
-    console.log('User does not have required role, redirecting to dashboard');
+  // If no specific roles are required, any authenticated user can access
+  if (!roles) {
+    return children;
+  }
+
+  // Check if user has required role
+  if (!roles.includes(user?.role)) {
+    console.log(`User role (${user?.role}) does not match required roles:`, roles);
+    
     // Redirect to appropriate dashboard based on user role
     if (user?.role === 'doctor') {
       return <Navigate to="/doctor-dashboard" replace />;
+    } else if (user?.role === 'patient') {
+      return <Navigate to="/dashboard" replace />;
+    } else if (user?.role === 'staff') {
+      return <Navigate to="/staff-dashboard" replace />;
     }
+    
+    // Fallback to general dashboard
     return <Navigate to="/dashboard" replace />;
   }
 
+  // User is authenticated and has the required role
   return children;
 };
 

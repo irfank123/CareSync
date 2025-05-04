@@ -5,6 +5,7 @@ import { check } from 'express-validator';
 import { withServices, withServicesForController } from '../utils/controllerHelper.mjs';
 import { asyncHandler, AppError, formatValidationErrors } from '../utils/errorHandler.mjs';
 import mongoose from 'mongoose';
+import googleCalendarService from '../services/googleCalendarService.mjs';
 
 /**
  * @desc    Get all appointments with filtering and pagination
@@ -888,6 +889,7 @@ const dependencies = {
   getDoctorAppointments: ['appointmentService', 'doctorService'],
   getUpcomingAppointments: ['appointmentService', 'patientService', 'doctorService'],
   getMyAppointments: ['patientService', 'doctorService', 'appointmentService']
+  // generateMeetingLink doesn't need DI as it uses dynamic imports
 };
 
 // Create the controller object with all methods
@@ -900,7 +902,9 @@ const appointmentController = {
   getPatientAppointments,
   getDoctorAppointments,
   getUpcomingAppointments,
-  getMyAppointments
+  getMyAppointments,
+  // generateMeetingLink,
+  // generateMeetLink
 };
 
 // Apply DI to the controller
@@ -951,7 +955,8 @@ export const {
 // Export the validation middleware
 export {
   createAppointmentValidation,
-  updateAppointmentValidation
+  updateAppointmentValidation,
+  // generateMeetLink
 };
 
 // Default export for compatibility
@@ -967,5 +972,6 @@ export default {
   getMyAppointments: getMyAppointmentsWithDI,
   getAppointmentTimeslot,
   createAppointmentValidation,
-  updateAppointmentValidation
+  updateAppointmentValidation,
+  // generateMeetLink
 };
