@@ -1,10 +1,19 @@
 // src/middleware/authMiddleware.mjs
 
 import jwt from 'jsonwebtoken';
+import { auth } from 'express-oauth2-jwt-bearer';
+import axios from 'axios';
 import { User, Clinic } from '../../models/index.mjs';
 import config from '../../config/config.mjs';
 import { AppError } from '../../utils/errorHandler.mjs';
 import tokenBlacklistService from '../../services/tokenBlacklistService.mjs';
+
+// --- Configure Auth0 JWT validation middleware --- 
+const checkJwt = auth({
+  audience: config.auth0.audience, 
+  issuerBaseURL: `https://${config.auth0.domain}/`,
+  tokenSigningAlg: 'RS256'
+});
 
 /**
  * Authentication middleware to protect routes
@@ -23,175 +32,189 @@ const authMiddleware = {
       return authHeader.split(' ')[1];
     }
     
-    // Then check cookies
-    if (req.cookies && req.cookies.token) {
-      return req.cookies.token;
-    }
-    
+    // No need to check cookies if using Auth0 Bearer token flow primarily
+    // if (req.cookies && req.cookies.token) { return req.cookies.token; }
     return null;
   },
 
   /**
-   * Middleware to authenticate users using JWT
+   * Middleware to authenticate users using Auth0 JWT
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object
    * @param {Function} next - Express next function
    */
   authenticate: async (req, res, next) => {
-    try {
-      // Extract token
-      const token = authMiddleware._extractToken(req);
-      
-      if (!token) {
-        return res.status(401).json({ 
-          success: false,
-          message: 'Authentication required'
-        });
+    // Log the URL being processed by this middleware
+    console.log(`[Auth Middleware START] Processing: ${req.method} ${req.originalUrl}`);
+
+    // 1. Let the Auth0 middleware validate the token structure, signature, audience, issuer
+    checkJwt(req, res, async (err) => {
+      if (err) {
+        console.error('[Auth Middleware] Auth0 JWT validation error:', err.message);
+        // Use status/message from the library's error if available
+        const status = err.status || 401;
+        const message = err.message || 'Invalid token';
+        return res.status(status).json({ success: false, message });
       }
-      
-      // Check if token is blacklisted
-      const isBlacklisted = await tokenBlacklistService.isBlacklisted(token);
-      if (isBlacklisted) {
-        return res.status(401).json({
-          success: false,
-          message: 'Token has been invalidated. Please log in again'
-        });
-      }
-      
-      // Verify token
-      const decoded = jwt.verify(token, config.jwt.secret);
-      
-      // Check token type (user or clinic)
-      if (decoded.type === 'clinic') {
-        // Handle clinic token
-        const clinic = await Clinic.findById(decoded.id);
-        
-        if (!clinic) {
-          return res.status(401).json({ 
-            success: false,
-            message: 'The clinic associated with this token no longer exists'
-          });
+
+      // Token is structurally valid. req.auth.payload has basic claims.
+      try {
+        // Log the payload received from checkJwt
+        console.log('[Auth Middleware] Decoded Auth0 Token Payload (from checkJwt):', JSON.stringify(req.auth.payload, null, 2));
+
+        const auth0UserId = req.auth.payload.sub; 
+        if (!auth0UserId) {
+           return res.status(401).json({ success: false, message: 'Missing user identifier in token' });
         }
         
-        // Check if clinic is active
-        if (!clinic.isActive) {
-          return res.status(401).json({ 
-            success: false,
-            message: 'Your clinic account has been deactivated'
-          });
+        // 2. Fetch full user profile (including email) from /userinfo endpoint
+        let userInfoResponse;
+        const token = authMiddleware._extractToken(req); // Get the raw token again
+        if (!token) {
+            // Should not happen if checkJwt passed, but check defensively
+             return res.status(401).json({ success: false, message: 'Auth token missing after validation' });
+        }
+        try {
+            const userInfoUrl = `https://${config.auth0.domain}/userinfo`;
+            console.log(`[Auth Middleware] Fetching user info from ${userInfoUrl}`);
+            userInfoResponse = await axios.get(userInfoUrl, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            console.log('[Auth Middleware] Received userinfo response:', JSON.stringify(userInfoResponse.data, null, 2));
+        } catch (userInfoError) {
+            console.error(`[Auth Middleware] Error fetching /userinfo: ${userInfoError.message}`, userInfoError.response?.data);
+            const status = userInfoError.response?.status || 500;
+            const message = userInfoError.response?.data?.error_description || 'Failed to fetch user profile from authentication server.';
+             return res.status(status).json({ success: false, message });
         }
         
-        // Find admin user
-        const adminUser = await User.findById(clinic.adminUserId);
+        const userEmail = userInfoResponse.data.email;
+        const emailVerified = userInfoResponse.data.email_verified;
         
-        // Attach clinic and user to request
-        req.clinic = clinic;
-        req.user = adminUser;
-        req.userType = 'clinic';
-        req.userRole = 'admin';
+        if (!userEmail) {
+            // We specifically requested email scope, something is wrong if it's missing here
+             console.error('[Auth Middleware] Email missing from /userinfo response despite requesting scope.');
+             return res.status(401).json({ success: false, message: 'Could not retrieve user email from authentication server.' });
+        }
         
-        // Add auth context for logging
-        req.authContext = {
-          clinicId: clinic._id,
-          userId: adminUser ? adminUser._id : null,
-          tokenIssued: new Date(decoded.iat * 1000),
-          tokenExpires: new Date(decoded.exp * 1000)
-        };
-      } else {
-        // Handle regular user token
-        const user = await User.findById(decoded.id);
-        
+        // 3. Find or link the corresponding user in *your* database
+        let user = await User.findOne({ auth0Id: auth0UserId });
+
         if (!user) {
-          return res.status(401).json({ 
-            success: false,
-            message: 'The user belonging to this token no longer exists'
-          });
+            // User not found by auth0Id. Try finding by email.
+            console.log(`[Auth Middleware] User not found by auth0Id ${auth0UserId}. Attempting lookup by email ${userEmail}...`);
+            user = await User.findOne({ email: userEmail });
+            if (user) {
+                // User found by email - Link the account by storing the auth0Id
+                console.log(`[Auth Middleware] User found by email (${userEmail}). Linking auth0Id ${auth0UserId}.`);
+                user.auth0Id = auth0UserId;
+                if (!user.emailVerified && emailVerified) {
+                    console.log(`[Auth Middleware] Marking email ${userEmail} as verified based on Auth0 userinfo.`);
+                    user.emailVerified = true;
+                }
+                try {
+                  await user.save();
+                  console.log(`[Auth Middleware] Successfully linked auth0Id ${auth0UserId} to user ${user._id}.`);
+                } catch (saveError) {
+                  console.error(`[Auth Middleware] Error saving user ${user._id} after linking auth0Id:`, saveError);
+                  return res.status(500).json({ success: false, message: 'Error linking user account.' });
+                }
+            } else {
+                 // Still not found by email. CREATE a new user.
+                 console.warn(`[Auth Middleware] User with Auth0 ID ${auth0UserId} and email ${userEmail} not found. Creating new user.`);
+                 try {
+                    const newUser = new User({
+                        auth0Id: auth0UserId,
+                        email: userEmail,
+                        emailVerified: emailVerified, // Use verification status from Auth0
+                        firstName: userInfoResponse.data.given_name || 'Auth0User', // Get names from userinfo
+                        lastName: userInfoResponse.data.family_name || auth0UserId, // Use ID as fallback
+                        role: 'admin', // Assign default role for clinic portal users
+                        isActive: true, // Assume active on creation
+                        // passwordHash is not needed due to schema change
+                        // phoneNumber is optional
+                        profileImageUrl: userInfoResponse.data.picture // Get picture if available
+                    });
+                    user = await newUser.save(); // Assign the newly created user to the 'user' variable
+                    console.log(`[Auth Middleware] Successfully created and saved new user ${user._id} for auth0Id ${auth0UserId}.`);
+                 } catch (creationError) {
+                     console.error(`[Auth Middleware] Error creating new user for auth0Id ${auth0UserId}:`, creationError);
+                     // Check for duplicate key errors (e.g., email already exists but with different auth0Id - should be rare)
+                     if (creationError.code === 11000) { // Duplicate key error code
+                        return res.status(409).json({ success: false, message: 'An account with this email may already exist but is not linked correctly.' });
+                     }
+                     return res.status(500).json({ success: false, message: 'Failed to create user profile during first login.' });
+                 }
+            }
         }
         
-        // Check if user is active
+        // 4. User found/linked - perform existing checks and attach info
+        if (!user) {
+            // This case should technically not be reachable if creation/linking worked, but log defensively
+            console.error('[Auth Middleware] CRITICAL: User object is null/undefined after creation/linking logic!');
+             return res.status(500).json({ success: false, message: 'Internal error processing user authentication.' });
+        }
+        console.log(`[Auth Middleware] Proceeding with user ${user._id}. Checking isActive...`);
+        
         if (!user.isActive) {
-          return res.status(401).json({ 
-            success: false,
-            message: 'Your account has been deactivated'
-          });
+           console.log(`[Auth Middleware] User ${user._id} is NOT active. Returning 401.`);
+           return res.status(401).json({ success: false, message: 'Your account has been deactivated' });
         }
         
-        // Check if account is locked
-        if (user.isAccountLocked && user.isAccountLocked()) {
-          return res.status(401).json({ 
-            success: false,
-            message: 'Your account has been temporarily locked due to too many failed login attempts'
-          });
-        }
-        
-        // Check token issued time against password change time (if password was changed)
-        if (user.passwordChangedAt && user.changedPasswordAfter(decoded.iat)) {
-          return res.status(401).json({ 
-            success: false,
-            message: 'Password was recently changed. Please log in again'
-          });
-        }
-        
-        // Add user to request
+        console.log(`[Auth Middleware] User ${user._id} is active. Attaching user to request.`);
         req.user = user;
         req.userRole = user.role;
-        req.userType = 'user';
+        req.userType = 'user'; 
+        let clinic = null;
         
-        // If this is a clinic admin, add clinic information
-        if (user.role === 'admin' && decoded.clinicId) {
-          req.isClinicAdmin = true;
-          req.clinicId = decoded.clinicId;
-          
-          // Fetch clinic data
-          try {
-            const clinic = await Clinic.findById(decoded.clinicId);
-            if (clinic) {
-              req.clinic = clinic;
-            }
-          } catch (clinicError) {
-            console.error('Error fetching clinic data:', clinicError);
-            // Continue authentication even if clinic fetch fails
-          }
-        }
-        
-        // Add auth context for logging
-        req.authContext = {
-          userId: user._id,
-          role: user.role,
-          tokenIssued: new Date(decoded.iat * 1000),
-          tokenExpires: new Date(decoded.exp * 1000)
-        };
+        console.log(`[Auth Middleware] Checking clinicId on user: ${user.clinicId}`);
+        if (user.clinicId) {
+           console.log(`[Auth Middleware] User has clinicId ${user.clinicId}. Fetching clinic...`);
+           try {
+             clinic = await Clinic.findById(user.clinicId);
+             if (clinic) {
+                console.log(`[Auth Middleware] Found clinic ${clinic._id}. Checking if active...`);
+               if (!clinic.isActive) {
+                 console.log(`[Auth Middleware] Clinic ${clinic._id} is NOT active. Returning 401.`);
+                 return res.status(401).json({ success: false, message: 'The associated clinic account has been deactivated' });
+               }
+               console.log(`[Auth Middleware] Clinic ${clinic._id} is active. Attaching clinic to request.`);
+               req.clinic = clinic;
+               if (user.role === 'admin') { 
+                   req.isClinicAdmin = true; 
+                   req.userType = 'clinic'; 
+               }
+             } else {
+               console.warn(`[Auth Middleware] Clinic lookup failed for ID: ${user.clinicId}. Returning 401.`);
+               return res.status(401).json({ success: false, message: 'Associated clinic not found' });
+             }
+           } catch (clinicError) {
+             console.error(`[Auth Middleware] Error fetching clinic ${user.clinicId}:`, clinicError);
+             return res.status(500).json({ success: false, message: 'Error retrieving clinic details' });
+           }
+         } else {
+             console.log(`[Auth Middleware] User ${user._id} does not have a clinicId.`);
+         }
+         
+         // Re-create the authContext attachment here
+         req.authContext = {
+            userId: user._id,
+            auth0Sub: auth0UserId, // Keep auth0UserId from before
+            role: user.role,
+            clinicId: clinic ? clinic._id : undefined,
+            tokenIssued: new Date(req.auth.payload.iat * 1000),
+            tokenExpires: new Date(req.auth.payload.exp * 1000)
+         };
+         console.log(`[Auth Middleware] Attaching authContext:`, req.authContext);
+
+         console.log(`[Auth Middleware] Authentication successful for user ${user._id}. Calling next().`);
+         next(); 
+
+      } catch (dbError) {
+        console.error('[Auth Middleware] Error during DB operations:', dbError);
+        return res.status(500).json({ success: false, message: 'Error processing authentication' });
       }
-      
-      next();
-    } catch (error) {
-      if (error.name === 'JsonWebTokenError') {
-        return res.status(401).json({ 
-          success: false,
-          message: 'Invalid token'
-        });
-      }
-      
-      if (error.name === 'TokenExpiredError') {
-        return res.status(401).json({ 
-          success: false,
-          message: 'Token has expired'
-        });
-      }
-      
-      if (error.name === 'NotBeforeError') {
-        return res.status(401).json({ 
-          success: false,
-          message: 'Token not yet valid'
-        });
-      }
-      
-      console.error('Authentication error:', error);
-      return res.status(500).json({ 
-        success: false,
-        message: 'Authentication error'
-      });
-    }
+    });
   },
   
   /**
@@ -206,7 +229,11 @@ const authMiddleware = {
    */
   restrictTo: (...roles) => {
     return (req, res, next) => {
+      const requiredRoles = roles.join(', ');
+      console.log(`[restrictTo] Checking roles for ${req.method} ${req.originalUrl}. Required: ${requiredRoles}. User role: ${req.userRole}`);
+      
       if (!req.user || !req.userRole) {
+        console.log(`[restrictTo] FAILED: No user or userRole found on request.`);
         return res.status(401).json({ 
           success: false,
           message: 'Authentication required'
@@ -214,12 +241,14 @@ const authMiddleware = {
       }
       
       if (!roles.includes(req.userRole)) {
+        console.log(`[restrictTo] FAILED: User role '${req.userRole}' not in allowed roles [${requiredRoles}].`);
         return res.status(403).json({ 
           success: false,
           message: 'You do not have permission to perform this action'
         });
       }
       
+      console.log(`[restrictTo] SUCCESS: User role '${req.userRole}' is authorized.`);
       next();
     };
   },

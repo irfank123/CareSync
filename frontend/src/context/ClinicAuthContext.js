@@ -33,21 +33,15 @@ export const ClinicAuthProvider = ({ children }) => {
     
     setProfileLoading(true);
     try {
-      // Optional: Secure backend calls using the Auth0 Access Token
-      // const token = await getAccessTokenSilently();
-      // const response = await axiosInstance.get('/auth/clinic/me', {
-      //   headers: { Authorization: `Bearer ${token}` }
-      // });
-      
-      // --- OR --- If backend doesn't need Auth0 token yet, make the call directly
-      // This assumes your backend can identify the clinic admin based on the 
-      // Auth0 user (e.g., via email/sub) perhaps during first login/sync.
-      // If the backend still relies on its own session/token for this endpoint,
-      // that needs to be reconciled with the Auth0 flow.
-      // For now, let's assume the backend might not be fully integrated yet for this call:
-      const response = await axiosInstance.get('/auth/clinic/me'); 
-      // ^^^ Note: This endpoint might need adjustment in the backend ^^^ 
-      //     to work without its own cookie/token if called after Auth0 login.
+      // --- Secure backend calls using the Auth0 Access Token ---
+      const token = await getAccessTokenSilently();
+      // Log the actual token value
+      console.log('Auth0 Access Token fetched for /me request:', token); 
+      const response = await axiosInstance.get('/api/auth/clinic/me', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      // --- Remove the fallback direct call ---
+      // const response = await axiosInstance.get('/api/auth/clinic/me'); 
       
       if (response.data.success && response.data.clinic) {
         setClinicInfo(response.data.clinic);

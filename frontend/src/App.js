@@ -25,6 +25,8 @@ import NotFound from './pages/NotFound';
 import MedicalRecords from './pages/MedicalRecords';
 import ClinicDashboard from './pages/ClinicDashboard';
 import AuthError from './pages/AuthError';
+import ManageStaff from './pages/clinic/ManageStaff';
+import ClinicAppointments from './pages/clinic/ClinicAppointments';
 
 // Components
 import Header from './components/common/Header';
@@ -163,6 +165,22 @@ function App() {
                     element={
                       <ProtectedClinicRoute>
                         <ClinicDashboard />
+                      </ProtectedClinicRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/clinic/staff" 
+                    element={
+                      <ProtectedClinicRoute>
+                        <ManageStaff />
+                      </ProtectedClinicRoute>
+                    } 
+                  />
+                  <Route 
+                    path="/clinic/appointments" 
+                    element={
+                      <ProtectedClinicRoute>
+                        <ClinicAppointments />
                       </ProtectedClinicRoute>
                     } 
                   />

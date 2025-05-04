@@ -12,9 +12,11 @@ import appointmentRoutes from './appointmentRoutes.mjs';
 import availabilityRoutes from './availabilityRoutes.mjs';
 import testRoutes from './testRoutes.mjs';
 import assessmentRoutes from './assessmentRoutes.mjs';
+import clinicRoutes from './clinicRoutes.mjs';
 // import systemSettingsRoutes from './systemSettingsRoutes.mjs'; // Removed
 // import dashboardRoutes from './dashboardRoutes.mjs'; // Removed
 import prescriptionRoutes from './prescriptionRoutes.mjs';
+import googleAuthRoutes from './googleAuthRoutes.mjs';
 import { 
   errorMiddleware, 
   rateLimitMiddleware,
@@ -29,6 +31,14 @@ const setupRoutes = (app) => {
   // Apply global middleware to all routes
   app.use(dataMiddleware.sanitizeResponse());
   
+  // --- REMOVE TEMPORARY DIAGNOSTIC ROUTE ---
+  /*
+  app.get('/api/auth/google/callback', (req, res, next) => {
+      console.log('<<<<<<<<<< HIT TEMPORARY CALLBACK ROUTE in index.mjs >>>>>>>>>>');
+      res.status(500).send('Temporary route hit - Check Logs');
+  });
+  */
+  
   // API routes
   const apiRouter = express.Router();
   
@@ -40,6 +50,9 @@ const setupRoutes = (app) => {
   
   // Clinic auth routes
   apiRouter.use('/auth/clinic', clinicAuthRoutes);
+  
+  // Google auth routes - Mount separately to avoid potential conflicts under /api/auth
+  app.use('/google-auth', googleAuthRoutes);
   
   // Admin routes
   apiRouter.use('/admin', adminRoutes);
@@ -68,13 +81,21 @@ const setupRoutes = (app) => {
   // Assessment routes
   apiRouter.use('/assessments', assessmentRoutes);
   
+  // Clinic routes (assuming clinic info is a core resource)
+  apiRouter.use('/clinics', clinicRoutes);
+  
   // Test routes (for development only)
   if (process.env.NODE_ENV === 'development') {
     apiRouter.use('/test', testRoutes);
   }
   
   // Mount API router at /api
-  app.use('/api', apiRouter);
+  // Add logging just BEFORE using apiRouter
+  app.use('/api', (req, res, next) => {
+    console.log(`[Router Entry] Request reaching /api: ${req.method} ${req.originalUrl}`);
+    console.log(`[Router Entry] Headers: ${JSON.stringify(req.headers, null, 2)}`);
+    next();
+  }, apiRouter); // Mount apiRouter AFTER the logging middleware
   
   // Health check route
   app.get('/health', (req, res) => {

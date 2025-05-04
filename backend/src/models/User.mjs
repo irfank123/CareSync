@@ -22,8 +22,8 @@ const UserSchema = new mongoose.Schema(
     },
     passwordHash: {
       type: String,
-      required: [true, 'Please add a password'],
-      minlength: [8, 'Password must be at least 8 characters'],
+      required: [function() { return !this.auth0Id; }, 'Password is required for non-Auth0 registration'],
+      minlength: [function() { return !this.auth0Id ? 8 : 0; }, 'Password must be at least 8 characters'],
       select: false,
     },
     role: {
@@ -49,7 +49,7 @@ const UserSchema = new mongoose.Schema(
     },
     phoneNumber: {
       type: String,
-      required: [true, 'Please add a phone number'],
+      required: false,
       match: [
         /^\+?[1-9]\d{9,14}$/, 
         'Please add a valid phone number'
@@ -153,6 +153,11 @@ const UserSchema = new mongoose.Schema(
           default: true
         }
       }
+    },
+    // Google OAuth Refresh Token
+    googleRefreshToken: {
+        type: String,
+        select: false // Important: Don't send refresh token in normal user queries
     }
   },
   {

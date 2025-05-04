@@ -19,7 +19,8 @@ class ClinicService {
       const newClinic = new Clinic({
         ...clinicData,
         adminUserId: userId,
-        verificationStatus: 'pending', // Default status
+        verificationStatus: 'verified', // Explicitly set to verified, bypassing default
+        isActive: true // Ensure isActive is also set
         // Set defaults for other fields if needed
       });
       const savedClinic = await newClinic.save({ session });

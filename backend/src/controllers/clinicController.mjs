@@ -36,7 +36,9 @@ const createClinic = async (req, res, next, { clinicService }) => {
 // Validation rules for creating a clinic
 export const createClinicValidation = [
   check('name', 'Clinic name is required').not().isEmpty().trim(),
-  check('phone', 'Valid phone number is required').isMobilePhone(), // Use appropriate validation
+  // Temporarily relax phone validation to just check if not empty
+  check('phone', 'Phone number is required').not().isEmpty(), 
+  // check('phone', 'Valid phone number is required').isMobilePhone(), // Original stricter validation
   check('address.street', 'Street address is required').not().isEmpty(),
   check('address.city', 'City is required').not().isEmpty(),
   check('address.state', 'State is required').not().isEmpty(),

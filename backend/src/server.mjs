@@ -156,11 +156,13 @@ const startApp = async () => {
     });
     */
 
-    // --- Mount Routers ---
+    // --- Mount Routers (REMOVED - Handled by setupRoutes in app.mjs) ---
+    /*
     app.use('/api/auth', authRoutes);
     app.use('/api/auth/clinic', clinicAuthRoutes);
     app.use('/api/clinics', clinicRoutes);
     // TODO: Mount other resource routers
+    */
 
     // --- Global Error Handler --- 
     // app.use(globalErrorHandler); 

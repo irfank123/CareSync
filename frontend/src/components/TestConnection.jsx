@@ -10,7 +10,7 @@ const TestConnection = () => {
     const testConnection = async () => {
       try {
         // Note: The health endpoint is at /health, not /api/health
-        const response = await axios.get(`${process.env.REACT_APP_API_URL.replace('/api', '')}/health`);
+        const response = await axios.get(`${process.env.REACT_APP_API_URL}/health`);
         setStatus(response.data);
         setError('');
       } catch (err) {

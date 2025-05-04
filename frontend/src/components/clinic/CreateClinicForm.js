@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Box, TextField, Button, Typography, Grid, Paper, CircularProgress, Alert } from '@mui/material';
 import { useClinicAuth } from '../../context/ClinicAuthContext';
+import { useAuth0 } from '@auth0/auth0-react';
 import { axiosInstance } from '../../services/api';
 
 const CreateClinicForm = () => {
-  const { fetchClinicProfile } = useClinicAuth();
+  const { getAccessTokenSilently } = useAuth0();
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
@@ -61,7 +62,16 @@ const CreateClinicForm = () => {
 
     setIsLoading(true);
     try {
-      const response = await axiosInstance.post('/clinics', formData);
+      // Get the Auth0 access token
+      const token = await getAccessTokenSilently();
+      // Log the actual token value
+      console.log('Auth0 Access Token fetched for /clinics request:', token);
+      
+      // Use the correct full path including /api prefix and add Authorization header
+      const response = await axiosInstance.post('/api/clinics', formData, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
       if (response.data.success) {
         // Refresh the clinic auth context to get the new clinic info
         // await fetchClinicProfile(); // Commented out: Backend endpoint /auth/clinic/me doesn't exist yet

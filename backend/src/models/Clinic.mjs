@@ -1,20 +1,29 @@
 import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
+// import bcrypt from 'bcryptjs'; // No longer needed here
 
 const clinicSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true
   },
+  // Removed email field - Belongs to the admin User
+  /*
   email: {
     type: String,
     required: true,
     unique: true,
     lowercase: true
   },
+  */
   phone: {
     type: String,
     required: true
+  },
+  // Optional: Add a general contact email if needed, separate from login
+  contactEmail: {
+      type: String,
+      lowercase: true,
+      trim: true
   },
   address: {
     street: String,
@@ -23,23 +32,29 @@ const clinicSchema = new mongoose.Schema({
     zipCode: String,
     country: String
   },
+  // Removed password field - Clinics don't have passwords
+  /*
   password: {
     type: String,
     required: true,
     select: false 
   },
+  */
   adminUserId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+    ref: 'User',
+    required: true // A clinic must have an admin user
   },
   emailVerified: {
-    type: Boolean,
-    default: false
+    // This likely referred to the clinic's own email, remove or repurpose?
+    // Let's remove for now, verification happens at the User level.
+    type: Boolean
+    // default: false 
   },
   verificationStatus: {
     type: String,
     enum: ['pending', 'in_review', 'verified', 'rejected'],
-    default: 'pending'
+    default: 'verified'
   },
   verificationDocuments: [{
     type: String, 
@@ -64,16 +79,20 @@ const clinicSchema = new mongoose.Schema({
   updatedAt: {
     type: Date,
     default: Date.now
+  },
+  // Add isActive field
+  isActive: {
+    type: Boolean,
+    default: true,
+    index: true // Good to index if queried often
   }
 }, { timestamps: true });
 
-//hash password before saving
+// Removed password hashing logic
+/*
 clinicSchema.pre('save', async function(next) {
   this.updatedAt = Date.now();
-  
-  //only hash password if it's modified or new
   if (!this.isModified('password')) return next();
-  
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
@@ -82,8 +101,10 @@ clinicSchema.pre('save', async function(next) {
     next(error);
   }
 });
+*/
 
-//method to compare passwords
+// Removed password comparison method
+/*
 clinicSchema.methods.comparePassword = async function(candidatePassword) {
   try {
     return await bcrypt.compare(candidatePassword, this.password);
@@ -91,6 +112,7 @@ clinicSchema.methods.comparePassword = async function(candidatePassword) {
     throw error;
   }
 };
+*/
 
 const Clinic = mongoose.model('Clinic', clinicSchema);
 export default Clinic;

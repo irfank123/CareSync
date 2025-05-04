@@ -177,6 +177,9 @@ const submitVerification = async (req, res, next, { clinicAuthService }) => {
  */
 const getClinicProfile = async (req, res, next, { clinicAuthService }) => {
   try {
+    // Log what the controller receives
+    console.log(`[getClinicProfile] Received request. User ID: ${req.user?._id}, Clinic ID on User: ${req.user?.clinicId}, req.clinic present: ${!!req.clinic}`);
+
     const clinic = clinicAuthService.sanitizeClinicData(req.clinic);
     
     res.status(200).json({ 
