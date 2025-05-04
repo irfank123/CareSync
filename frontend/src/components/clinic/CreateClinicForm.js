@@ -64,8 +64,11 @@ const CreateClinicForm = () => {
       const response = await axiosInstance.post('/clinics', formData);
       if (response.data.success) {
         // Refresh the clinic auth context to get the new clinic info
-        await fetchClinicProfile(); 
-        // The ClinicDashboard will re-render due to context update
+        // await fetchClinicProfile(); // Commented out: Backend endpoint /auth/clinic/me doesn't exist yet
+        // TODO: Once /auth/clinic/me is working, uncomment the line above
+        //       OR potentially update clinicInfo state directly from the response here.
+        console.log('Clinic created successfully according to backend response:', response.data);
+        // The ClinicDashboard will re-render due to context update (if fetchClinicProfile worked or state is set)
       } else {
          // Handle specific errors from backend if provided
          setSubmitError(response.data.message || 'Failed to create clinic. Please try again.');

@@ -1,106 +1,96 @@
 import React, { createContext, useState, useEffect, useContext, useCallback } from 'react';
-import { jwtDecode } from 'jwt-decode'; // Correct named import
-import Cookies from 'js-cookie'; // Using js-cookie for easier cookie handling
-import { axiosInstance } from '../services/api'; // Corrected import name
+import { useAuth0 } from '@auth0/auth0-react'; // Import useAuth0
+import { jwtDecode } from 'jwt-decode'; // Keep for potential use, but primary auth is Auth0
+import Cookies from 'js-cookie'; // Keep for removing old cookies
+import { axiosInstance } from '../services/api';
 
 const ClinicAuthContext = createContext(null);
 
 export const ClinicAuthProvider = ({ children }) => {
-  const [clinicUser, setClinicUser] = useState(null);
+  // Use Auth0 hook for primary authentication state
+  const { 
+    user: auth0User, 
+    isAuthenticated: isAuth0Authenticated, 
+    isLoading: auth0Loading, 
+    logout: auth0Logout,
+    getAccessTokenSilently // Needed if you call protected APIs later
+  } = useAuth0();
+
+  // State for additional clinic-specific info fetched from your backend
   const [clinicInfo, setClinicInfo] = useState(null);
-  const [isClinicAuthenticated, setIsClinicAuthenticated] = useState(false);
-  const [loading, setLoading] = useState(true);
+  // Separate loading state for the backend profile fetch
+  const [profileLoading, setProfileLoading] = useState(false);
 
+  // Use Auth0's state for core authentication status and loading
+  const isClinicAuthenticated = isAuth0Authenticated;
+  const loading = auth0Loading; // Primary loading indicator tied to Auth0 init
+  const clinicUser = auth0User; // Use the user object from Auth0
+
+  // Function to fetch additional clinic profile data from backend *after* Auth0 login
   const fetchClinicProfile = useCallback(async () => {
-    setLoading(true);
+    // Only fetch if authenticated via Auth0
+    if (!isAuth0Authenticated) return;
+    
+    setProfileLoading(true);
     try {
-      // Use the imported axiosInstance
+      // Optional: Secure backend calls using the Auth0 Access Token
+      // const token = await getAccessTokenSilently();
+      // const response = await axiosInstance.get('/auth/clinic/me', {
+      //   headers: { Authorization: `Bearer ${token}` }
+      // });
+      
+      // --- OR --- If backend doesn't need Auth0 token yet, make the call directly
+      // This assumes your backend can identify the clinic admin based on the 
+      // Auth0 user (e.g., via email/sub) perhaps during first login/sync.
+      // If the backend still relies on its own session/token for this endpoint,
+      // that needs to be reconciled with the Auth0 flow.
+      // For now, let's assume the backend might not be fully integrated yet for this call:
       const response = await axiosInstance.get('/auth/clinic/me'); 
-      if (response.data.success) {
-        setClinicUser(response.data.user); // Contains user info (admin)
-        setClinicInfo(response.data.clinic); // Contains clinic details
-        setIsClinicAuthenticated(true);
-        return true;
-      }
-      throw new Error('Failed to fetch clinic profile');
-    } catch (error) {
-      console.error('Error fetching clinic profile:', error);
-      // Clear potentially invalid token/state if fetch fails
-      Cookies.remove('token'); 
-      setClinicUser(null);
-      setClinicInfo(null);
-      setIsClinicAuthenticated(false);
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const validateTokenAndFetchUser = async () => {
-      const token = Cookies.get('token');
-      if (token) {
-        try {
-          const decoded = jwtDecode(token);
-          // Check if token is expired
-          const isExpired = decoded.exp * 1000 < Date.now();
-          // Check if it looks like a clinic admin token (based on backend logic)
-          // Note: Role might be just 'admin', check clinicId presence is safer
-          const looksLikeClinicToken = decoded.role === 'admin' && decoded.clinicId;
-
-          if (!isExpired && looksLikeClinicToken) {
-            // Token exists, is not expired, and looks like a clinic token.
-            // Fetch full profile from backend to confirm validity and get full data.
-            await fetchClinicProfile();
-          } else {
-            // Token is expired or doesn\'t seem to be a clinic token
-            Cookies.remove('token');
-            setIsClinicAuthenticated(false);
-            setLoading(false);
-          }
-        } catch (error) {
-          console.error('Error decoding token:', error);
-          Cookies.remove('token');
-          setIsClinicAuthenticated(false);
-          setLoading(false);
-        }
+      // ^^^ Note: This endpoint might need adjustment in the backend ^^^ 
+      //     to work without its own cookie/token if called after Auth0 login.
+      
+      if (response.data.success && response.data.clinic) {
+        setClinicInfo(response.data.clinic);
       } else {
-        setIsClinicAuthenticated(false);
-        setLoading(false);
+        console.warn('Could not fetch clinic-specific info from backend.');
+        setClinicInfo(null); // Ensure state is clear if fetch fails
       }
-    };
-
-    validateTokenAndFetchUser();
-    // Re-fetch profile when the function reference changes (though it shouldn't often)
-  }, [fetchClinicProfile]);
-
-  const logoutClinic = useCallback(async () => {
-    setLoading(true);
-    try {
-      // Optional: Call a backend logout endpoint if one exists for clinics 
-      // await axiosInstance.post('/auth/clinic/logout'); 
-      console.log('Logging out clinic user');
     } catch (error) {
-      console.error('Clinic logout error:', error);
-      // Proceed with client-side logout even if backend fails
-    } finally {
-      Cookies.remove('token');
-      setClinicUser(null);
+      console.error('Error fetching clinic profile from backend:', error);
       setClinicInfo(null);
-      setIsClinicAuthenticated(false);
-      setLoading(false);
-      // Redirect to home or login page after logout
-      window.location.href = '/'; // Simple redirect for now
+    } finally {
+      setProfileLoading(false);
     }
-  }, []);
+  }, [isAuth0Authenticated, getAccessTokenSilently]); // Add dependencies
+
+  // Fetch backend profile info when Auth0 authentication completes
+  useEffect(() => {
+    if (isAuth0Authenticated) {
+      fetchClinicProfile();
+    } else {
+      // Clear clinic-specific info if Auth0 session ends
+      setClinicInfo(null);
+    }
+  }, [isAuth0Authenticated, fetchClinicProfile]); // Depend on Auth0 state
+
+  // Logout function: Clears Auth0 session and potentially local state/cookies
+  const logoutClinic = useCallback(() => {
+    console.log('Logging out clinic user via Auth0...');
+    // Clear any old backend cookies just in case
+    Cookies.remove('token'); 
+    // Trigger Auth0 logout - redirects to Auth0 logout endpoint
+    // and then back to the configured logout URL (usually app root)
+    auth0Logout({ logoutParams: { returnTo: window.location.origin } });
+    // No need to manually set state here, Auth0Provider handles it after redirect
+  }, [auth0Logout]);
 
   const value = {
-    clinicUser,
-    clinicInfo,
-    isClinicAuthenticated,
-    loading,
-    fetchClinicProfile, // Expose fetch profile in case manual refresh is needed
-    logoutClinic,
+    clinicUser, // User object from Auth0
+    clinicInfo, // Additional info from backend
+    isClinicAuthenticated, // Auth state from Auth0
+    loading: loading || profileLoading, // Combined loading state
+    fetchClinicProfile,
+    logoutClinic, // Use this for logout buttons
   };
 
   return (

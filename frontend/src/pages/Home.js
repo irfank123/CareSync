@@ -14,6 +14,7 @@ import {
 } from '@mui/material';
 import { useAuth } from '../context/AuthContext';
 import { useClinicAuth } from '../context/ClinicAuthContext';
+import { useAuth0 } from '@auth0/auth0-react';
 
 const features = [
   {
@@ -41,47 +42,14 @@ const features = [
 const Home = () => {
   const { isAuthenticated: isClientAuthenticated, user: clientUser } = useAuth();
   const { isClinicAuthenticated, loading: clinicLoading } = useClinicAuth();
+  const { loginWithRedirect, user: auth0User, isAuthenticated: isAuth0Authenticated, isLoading: auth0Loading } = useAuth0();
   const navigate = useNavigate();
 
-  // Initiate Auth0 login/signup flow by redirecting to the backend endpoint
-  const initiateAuth0Flow = () => {
-    const baseUrlString = process.env.REACT_APP_API_URL || window.location.origin;
-    let relativeAuthPath = '/api/auth/clinic/auth0/login'; // Path relative to API root
+  // Log the state from useAuth0
+  console.log('Auth0 State in Home:', { auth0Loading, isAuth0Authenticated, auth0User });
 
-    try {
-      const baseUrl = new URL(baseUrlString);
-      
-      // Check if the base URL's pathname already contains the /api prefix.
-      // Examples:
-      // http://localhost:5000/api -> pathname is /api
-      // http://localhost:3000 -> pathname is /
-      if (baseUrl.pathname.startsWith('/api')) {
-        // If base URL is like '.../api', the path should be relative to that
-        relativeAuthPath = '/auth/clinic/auth0/login'; 
-      }
-      
-      // Construct the final URL ensuring no double slashes in path
-      const finalUrl = new URL(baseUrl.pathname.replace(/\/?$/, '') + relativeAuthPath, baseUrl.origin).toString();
-
-      console.log('Redirecting to Auth0 backend URL:', finalUrl);
-      window.location.href = finalUrl;
-
-    } catch (error) {
-      console.error('Error constructing backend URL:', error);
-      alert('Could not initiate login. Invalid API URL configuration.');
-    }
-  };
-
-  // Both login and signup for the clinic portal now initiate the same Auth0 flow
-  const handleClinicLogin = () => {
-    console.log('Initiating Clinic Auth0 Login...');
-    initiateAuth0Flow();
-  };
-
-  const handleClinicSignUp = () => {
-    console.log('Initiating Clinic Auth0 Sign Up...');
-    initiateAuth0Flow();
-  };
+  const effectiveClinicLoading = clinicLoading || auth0Loading;
+  const effectiveIsClinicAuthenticated = isAuth0Authenticated;
 
   return (
     <Box>
@@ -167,9 +135,9 @@ const Home = () => {
                     </Typography>
                   </CardContent>
                   <CardActions sx={{ justifyContent: 'center', pb: 2 }}>
-                    {clinicLoading ? (
+                    {effectiveClinicLoading ? (
                       <CircularProgress size={24} /> 
-                    ) : isClinicAuthenticated ? (
+                    ) : effectiveIsClinicAuthenticated ? (
                       <Button 
                         variant="contained" 
                         color="secondary"
@@ -179,7 +147,13 @@ const Home = () => {
                       </Button>
                     ) : (
                       <>
-                        <Button variant="contained" color="secondary" onClick={handleClinicLogin} disabled={isClientAuthenticated}>
+                        <Button 
+                          variant="contained" 
+                          color="secondary" 
+                          onClick={() => loginWithRedirect({ 
+                          })}
+                          disabled={isClientAuthenticated}
+                        >
                           Login / Sign Up
                         </Button>
                       </>
