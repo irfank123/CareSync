@@ -1,65 +1,160 @@
 import { createTheme } from '@mui/material/styles';
 
+// Define base colors inspired by index.css variables
+const PRIMARY_COLOR = '#4a90e2';
+const SECONDARY_COLOR = '#f5a623';
+const BACKGROUND_LIGHT = '#f8f9fa';
+const BACKGROUND_PAPER = '#ffffff'; // Keep paper white for contrast
+const TEXT_COLOR = '#343a40';
+const BORDER_COLOR = '#ced4da';
+const SUCCESS_COLOR = '#28a745';
+const DANGER_COLOR = '#dc3545';
+
 export const theme = createTheme({
   palette: {
     primary: {
-      main: '#1976d2',
-      light: '#42a5f5',
-      dark: '#1565c0',
+      main: PRIMARY_COLOR,
+      // Generate light/dark shades or define explicitly if needed
     },
     secondary: {
-      main: '#9c27b0',
-      light: '#ba68c8',
-      dark: '#7b1fa2',
+      main: SECONDARY_COLOR,
+    },
+    success: {
+      main: SUCCESS_COLOR,
+    },
+    error: {
+      main: DANGER_COLOR,
     },
     background: {
-      default: '#f5f5f5',
-      paper: '#ffffff',
+      default: BACKGROUND_LIGHT,
+      paper: BACKGROUND_PAPER,
     },
+    text: {
+      primary: TEXT_COLOR,
+      // secondary: ... // Define if needed
+    },
+    divider: BORDER_COLOR,
   },
   typography: {
-    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
+    fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
     h1: {
-      fontSize: '2.5rem',
-      fontWeight: 500,
+      fontSize: '2.2rem',
+      fontWeight: 700, // Bold for main headings
     },
     h2: {
-      fontSize: '2rem',
-      fontWeight: 500,
+      fontSize: '1.8rem',
+      fontWeight: 600,
     },
     h3: {
-      fontSize: '1.75rem',
-      fontWeight: 500,
+      fontSize: '1.5rem',
+      fontWeight: 600,
     },
     h4: {
-      fontSize: '1.5rem',
+      fontSize: '1.25rem',
       fontWeight: 500,
     },
     h5: {
-      fontSize: '1.25rem',
+      fontSize: '1.1rem',
       fontWeight: 500,
     },
     h6: {
       fontSize: '1rem',
       fontWeight: 500,
     },
+    body1: {
+      fontSize: '1rem', // Base body size
+      lineHeight: 1.6,
+    },
+    button: {
+      textTransform: 'none', // Keep from previous override
+      fontWeight: 500,
+    }
+  },
+  spacing: 8, // Base spacing unit (8px)
+  shape: {
+    borderRadius: 8, // Consistent border radius
   },
   components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          // Apply global gradient if desired (though default background might be cleaner)
+          // background: `linear-gradient(to bottom right, ${BACKGROUND_LIGHT}, #e9ecef)`, 
+          scrollBehavior: 'smooth',
+        },
+        '::selection': {
+            backgroundColor: PRIMARY_COLOR,
+            color: '#fff',
+        },
+      },
+    },
     MuiButton: {
+      defaultProps: {
+        disableElevation: true, // Flatter buttons
+      },
       styleOverrides: {
         root: {
-          textTransform: 'none',
-          borderRadius: 8,
+          borderRadius: 8, // Use theme's border radius
+          padding: '8px 16px', // Adjust padding based on spacing unit
+        },
+        containedPrimary: {
+          '&:hover': {
+            backgroundColor: '#3a7bc8', // Darker primary on hover
+          },
         },
       },
     },
     MuiCard: {
+      defaultProps: {
+        elevation: 0, // Use border instead of shadow for a flatter look
+      },
       styleOverrides: {
         root: {
-          borderRadius: 12,
-          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+          borderRadius: 12, // Slightly larger radius for cards
+          // boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)', // Lighter shadow if preferred
+          border: `1px solid ${BORDER_COLOR}`, 
         },
       },
+    },
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+           // Common styling for Paper components if needed
+        },
+      },
+    },
+    MuiTextField: {
+      defaultProps: {
+        variant: 'outlined', // Default to outlined fields
+      },
+      styleOverrides: {
+        root: {
+          // Adjust spacing or styles if needed
+        },
+      },
+    },
+    MuiAppBar: {
+       defaultProps: {
+        elevation: 0, // Flat app bar
+        color: 'inherit', // Use custom background color
+      },
+      styleOverrides: {
+        root: {
+          backgroundColor: BACKGROUND_PAPER, // Or PRIMARY_COLOR
+          borderBottom: `1px solid ${BORDER_COLOR}`,
+        }
+      }
+    },
+    MuiLink: {
+      styleOverrides: {
+        root: {
+          color: PRIMARY_COLOR,
+          textDecoration: 'none',
+          '&:hover': {
+            textDecoration: 'underline',
+          }
+        }
+      }
     },
   },
 }); 

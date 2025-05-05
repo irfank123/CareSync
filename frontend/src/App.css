@@ -1,5 +1,43 @@
 .App {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: var(--background-light); /* Use background variable */
+}
+
+/* Example of a main content area styling */
+.main-content {
+  flex: 1; /* Allows content to fill available space */
+  padding: 2rem;
+  max-width: 1200px; /* Limit content width */
+  margin: 0 auto; /* Center content */
+  width: 100%;
+}
+
+/* Example of header styling */
+.app-header {
+  background-color: var(--primary-color);
+  color: white;
+  padding: 1rem 2rem;
+  box-shadow: var(--shadow-light);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+/* Example of footer styling */
+.app-footer {
+  background-color: var(--text-color);
+  color: var(--background-light);
+  padding: 1rem 2rem;
   text-align: center;
+  font-size: 0.9rem;
+  margin-top: auto; /* Pushes footer to bottom */
 }
 
 .App-logo {
