@@ -66,33 +66,69 @@ class PrescriptionService {
       throw new AppError('Invalid Patient ID format', 400);
     }
     
-    // Find prescriptions and populate doctor details (name) for display
+    // Step 1: Find prescriptions for the patient, selecting necessary fields including doctorId
     const prescriptions = await Prescription.find({ patientId })
-      .populate({
-        path: 'doctorId',
-        select: 'userId', // Select the userId field from Doctor
-        populate: {
-          path: 'userId',
-          model: 'User',
-          select: 'firstName lastName' // Select name fields from User
+        .select('_id patientId doctorId medications status prescriptionDate createdAt updatedAt expirationDate verificationCode') // Select fields needed
+        .sort({ prescriptionDate: -1 })
+        .lean(); // Use lean for performance as we'll manually map
+
+    if (!prescriptions || prescriptions.length === 0) {
+      return [];
+    }
+
+    // Step 2: Collect unique doctor IDs
+    const doctorIds = [...new Set(prescriptions.map(p => p.doctorId?.toString()).filter(id => id))];
+
+    // Step 3: Fetch the corresponding Doctor documents and populate their User details
+    const doctors = await Doctor.find({ '_id': { $in: doctorIds } })
+        .select('_id userId specialization') // Select fields needed from Doctor
+        .populate({ 
+            path: 'userId', 
+            model: 'User', 
+            select: 'firstName lastName title' // Select fields needed from User
+        })
+        .lean(); // Use lean
+
+    // Step 4: Create a lookup map for doctor details (doctorId -> { name, specialization })
+    const doctorDetailsMap = doctors.reduce((map, doc) => {
+        if (doc.userId) { // Check if population succeeded
+            map[doc._id.toString()] = {
+                name: `${doc.userId.title || 'Dr.'} ${doc.userId.firstName || ''} ${doc.userId.lastName || ''}`.trim(),
+                specialization: doc.specialization || 'N/A'
+            };
+        } else {
+             map[doc._id.toString()] = {
+                name: 'Unknown Doctor (User not found)',
+                specialization: doc.specialization || 'N/A'
+            };
         }
-      })
-      .sort({ issueDate: -1 }); // Sort by most recent first
-      
-    // Clean up the populated data for frontend use
+        return map;
+    }, {});
+    
+    console.log('[Service getPrescriptionsByPatient] Doctor Details Map:', doctorDetailsMap);
+
+    // Step 5: Map prescriptions to the final format, adding doctor details from the map
     return prescriptions.map(p => {
-        const presJson = p.toJSON();
+        const doctorDetails = doctorDetailsMap[p.doctorId?.toString()] || { name: 'Unknown Doctor', specialization: 'N/A' };
         
-        // Safely access nested populated data
-        const doctorUser = presJson.doctorId?.userId;
-        // Construct name safely, trimming potential extra space if one name part is missing
-        presJson.doctorName = doctorUser 
-            ? `Dr. ${doctorUser.firstName || ''} ${doctorUser.lastName || ''}`.trim()
-            : 'Unknown Doctor';
-            
-        // Optionally remove the populated object if not needed by frontend
-        // delete presJson.doctorId; 
-        return presJson;
+        // Construct the final object
+        const finalPrescription = {
+            ...p, // Spread the original prescription fields
+            issueDate: p.prescriptionDate, // Rename date field
+            doctorName: doctorDetails.name,
+            doctorSpecialization: doctorDetails.specialization,
+            // Remove fields we don't need to send to frontend
+            // delete p.prescriptionDate;
+            // delete p.doctorId;
+        };
+        
+        // Clean up fields before returning
+        delete finalPrescription.prescriptionDate;
+        delete finalPrescription.doctorId;
+        
+        console.log(`[Service getPrescriptionsByPatient] Mapped prescription for response:`, JSON.stringify(finalPrescription, null, 2));
+        
+        return finalPrescription;
     });
   }
 

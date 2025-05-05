@@ -16,6 +16,8 @@ const DoctorSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Please add a license number'],
       unique: true,
+      index: true,
+      trim: true
     },
     deaNumber: {
       type: String,
@@ -57,7 +59,11 @@ const DoctorSchema = new mongoose.Schema(
     },
     appointmentFee: {
       type: Number,
-      required: [true, 'Please add appointment fee'],
+      min: [0, 'Appointment fee cannot be negative']
+    },
+    bio: {
+      type: String,
+      maxlength: [1000, 'Bio cannot exceed 1000 characters']
     },
     createdAt: {
       type: Date,

@@ -147,19 +147,6 @@ router.post(
         return next(new AppError('Appointment does not belong to this clinic', 403));
       }
 
-      // Check if a link already exists using the plain object
-      if (appointmentObj.googleMeetLink) {
-        console.log(`[Route] Meet link already exists for appointment ${appointmentId}`);
-        return res.status(200).json({ 
-            success: true, 
-            message: 'Meet link already exists for this appointment', 
-            data: { 
-                meetLink: appointmentObj.googleMeetLink,
-                eventId: appointmentObj.googleEventId
-            }
-        });
-      }
-
       // --- Prepare event details using the plain object --- 
       const attendees = [];
       // Make sure populated fields are handled correctly in the plain object

@@ -5,6 +5,8 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import loadAndValidateConfig from '../config/config.mjs';
+import { AppError } from '../utils/errorHandler.mjs';
+import { AuditLog, Clinic } from '../models/index.mjs'; // Import Clinic model
 
 // Load the config
 const config = loadAndValidateConfig();
@@ -20,6 +22,22 @@ class AuthService {
     this.Patient = mongoose.model('Patient');
     this.Staff = mongoose.model('Staff');
     this.AuditLog = mongoose.model('AuditLog');
+    this.Clinic = Clinic; // Add Clinic model reference
+
+    // --- Explicitly bind the method --- 
+    this._hashPassword = this._hashPassword.bind(this);
+    // --- End binding ---
+  }
+
+  /**
+   * Hash password
+   * @param {string} password - Password to hash
+   * @returns {string} Hashed password
+   * @private
+   */
+  async _hashPassword(password) {
+    const salt = await bcrypt.genSalt(config.security.bcryptRounds || 10);
+    return await bcrypt.hash(password, salt);
   }
 
   /**
@@ -29,71 +47,94 @@ class AuthService {
    * @returns {Object} User data and token
    */
   async registerUser(userData, userType) {
-    const session = await mongoose.startSession();
+    console.log('[RegisterUser] Received userData:', JSON.stringify(userData, null, 2));
+    console.log('[RegisterUser] Received userType:', userType);
+    
+    const session = await this.User.startSession();
     session.startTransaction();
 
     try {
-      // Check if user with this email already exists
-      const existingUser = await this.User.findOne({ email: userData.email });
-      if (existingUser) {
-        throw new Error('User with this email already exists');
+      // Fetch the single clinic
+      const singleClinic = await this.Clinic.findOne().session(session);
+      if (!singleClinic) {
+        throw new AppError('No clinic found in the database. Cannot register user.', 500);
       }
+      const clinicId = singleClinic._id;
+      console.log(`[RegisterUser] Found clinic ID: ${clinicId} to associate user with.`);
 
-      let user, roleSpecificRecord;
+      // Hash password
+      const passwordHash = await this._hashPassword(userData.password);
 
-      // Create standard user (patient, doctor, staff)
-      user = await this.User.create([{
-        firstName: userData.firstName,
-        lastName: userData.lastName,
-        email: userData.email,
-        passwordHash: userData.password, // Will be hashed by pre-save hook
+      // Create user
+      const user = await this.User.create([
+        {
+          ...userData,
+          passwordHash,
         role: userType,
-        phoneNumber: userData.phoneNumber,
-        isActive: true,
-        clinicId: userData.clinicId
-      }], { session });
+          clinicId: (userType === 'doctor' || userType === 'staff') ? clinicId : undefined,
+        }
+      ], { session });
+      
+      console.log(`[RegisterUser] User created with ID: ${user[0]._id} and clinicId: ${user[0].clinicId}`);
 
       // Create role-specific record
+      let RoleModel;
+      let roleSpecificData = { 
+        userId: user[0]._id,
+        clinicId: (userType === 'doctor' || userType === 'staff') ? clinicId : undefined,
+      };
+      
       if (userType === 'patient') {
-        roleSpecificRecord = await this.Patient.create([{
-          userId: user[0]._id,
-          dateOfBirth: userData.dateOfBirth || new Date(),
-          gender: userData.gender || 'other'
-        }], { session });
+        RoleModel = this.Patient;
+        // Assuming patient specific data comes flat or under patientData?
+        // Adjust if needed based on actual frontend data for patients
+        roleSpecificData = { ...roleSpecificData, ...(userData.patientData || {}) }; 
+        delete roleSpecificData.clinicId;
       } else if (userType === 'doctor') {
-        roleSpecificRecord = await this.Doctor.create([{
-          userId: user[0]._id,
-          specialties: userData.specialties || [],
-          licenseNumber: userData.licenseNumber || 'TO_BE_VERIFIED',
-          appointmentFee: userData.appointmentFee || 0
-        }], { session });
+        RoleModel = this.Doctor;
+        // --- Extract doctor fields directly from userData --- 
+        roleSpecificData.licenseNumber = userData.licenseNumber; 
+        roleSpecificData.specialties = userData.specialties; 
+        roleSpecificData.appointmentFee = userData.appointmentFee; // Optional, but extract if present
+        roleSpecificData.deaNumber = userData.deaNumber; // Optional
+        roleSpecificData.bio = userData.bio; // Optional
+        roleSpecificData.education = userData.education; // Optional
+        // Add any other fields expected by the Doctor model that come flat
+        // --- End Extraction --- 
       } else if (userType === 'staff') {
-        roleSpecificRecord = await this.Staff.create([{
-          userId: user[0]._id,
-          position: userData.position || 'other',
-          department: userData.department || 'General'
-        }], { session });
+        RoleModel = this.Staff;
+        // --- Extract staff fields directly from userData --- 
+        roleSpecificData.position = userData.position;
+        roleSpecificData.department = userData.department;
+        // Add any other fields expected by the Staff model that come flat
+        // --- End Extraction ---
+      } else {
+        throw new AppError('Invalid user type for registration', 400);
       }
-
-      // Generate token
-      const token = this._generateToken(user[0]._id, userType, { 
-        clinicId: userData.clinicId 
+      
+      // Remove undefined fields before creating
+      Object.keys(roleSpecificData).forEach(key => {
+        if (roleSpecificData[key] === undefined) {
+          delete roleSpecificData[key];
+        }
       });
 
-      // Try to send welcome email
-      try {
-        if (this.emailService) {
-          await this.emailService.sendWelcomeEmail(user[0].email, user[0].firstName, userType);
-        }
-      } catch (emailError) {
-        console.error('Welcome email error:', emailError);
-        // Continue registration even if email fails
+      console.log(`[RegisterUser] Preparing to create ${userType} record with data:`, JSON.stringify(roleSpecificData, null, 2));
+
+      const roleSpecificRecord = await RoleModel.create([roleSpecificData], { session });
+      console.log(`[RegisterUser] ${userType} record created with ID: ${roleSpecificRecord[0]._id} and clinicId: ${roleSpecificRecord[0].clinicId}`);
+
+      // Generate token (include clinicId if user has it)
+      let tokenOptions = {};
+      if (user[0].clinicId) {
+        tokenOptions.clinicId = user[0].clinicId;
       }
+      const token = this._generateToken(user[0]._id, user[0].role, tokenOptions);
 
       // Create audit log
       await this.AuditLog.create([{
         userId: user[0]._id,
-        action: 'create',
+        action: 'register',
         resource: 'user',
         resourceId: user[0]._id,
         details: {
@@ -104,17 +145,20 @@ class AuthService {
 
       // Commit the transaction
       await session.commitTransaction();
+      console.log(`[RegisterUser] Transaction committed for user ${user[0].email}`);
 
       return { 
         user: this._sanitizeUserData(user[0]), 
-        roleSpecificRecord: roleSpecificRecord ? roleSpecificRecord[0] : null, 
+        roleSpecificRecord: roleSpecificRecord ? roleSpecificRecord[0].toObject() : null, // Convert role record to object
         token 
       };
     } catch (error) {
       // Abort transaction on error
       await session.abortTransaction();
       console.error('Registration error:', error);
-      throw new Error(error.message || 'Registration failed');
+      // Rethrow specific AppErrors, wrap others
+      if (error instanceof AppError) throw error;
+      throw new AppError(error.message || 'Registration failed', 500);
     } finally {
       session.endSession();
     }

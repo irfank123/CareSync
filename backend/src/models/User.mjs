@@ -177,33 +177,6 @@ UserSchema.virtual('fullName').get(function() {
 //create index for email + isActive for efficient login queries
 UserSchema.index({ email: 1, isActive: 1 });
 
-//passsword encryption 
-UserSchema.pre('save', async function(next) {
-  // Skip password validation and hashing for Auth0 users
-  if (this.auth0Id && !this.passwordHash) {
-    // For Auth0 users, we don't need a password - Auth0 handles authentication
-    return next();
-  }
-
-  // hash new or modified password
-  if (!this.isModified('passwordHash')) {
-    return next();
-  }
-  
-  //if password is changed and user exists, update passwordChangedAt
-  if (this.isModified('passwordHash') && !this.isNew) {
-    this.passwordChangedAt = Date.now() - 1000; // subtract 1 second for token validation
-  }
-
-  try {
-    const salt = await bcrypt.genSalt(config.security.bcryptRounds);
-    this.passwordHash = await bcrypt.hash(this.passwordHash, salt);
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
-
 //sign JWT and return
 UserSchema.methods.getSignedJwtToken = function() {
   let payload = { 

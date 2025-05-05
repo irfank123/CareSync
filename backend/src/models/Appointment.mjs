@@ -14,6 +14,12 @@ const AppointmentSchema = new mongoose.Schema(
       required: true,
       index: true
     },
+    clinicId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Clinic',
+      required: true,
+      index: true
+    },
     timeSlotId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'TimeSlot',

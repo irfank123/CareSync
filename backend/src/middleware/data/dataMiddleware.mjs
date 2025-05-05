@@ -180,23 +180,23 @@ const dataMiddleware = {
     if (!obj || typeof obj !== 'object') {
       return obj;
     }
-
+    
     // Handle Date objects
     if (obj instanceof Date) {
       return new Date(obj);
     }
-
+    
     // Detect circular references
     if (seen.has(obj)) {
       return "[Circular Reference]";
     }
     seen.set(obj, true);
-
+    
     // Handle arrays
     if (Array.isArray(obj)) {
       return obj.map(item => dataMiddleware._sanitizeObject(item, sensitiveFields, seen));
     }
-
+    
     // If it's a Mongoose document, convert it to a plain object first
     let plainObj = obj;
     let isAlreadyPlain = false; // Flag to avoid re-processing if obj was already plain
@@ -240,12 +240,12 @@ const dataMiddleware = {
       if (sensitiveFields.includes(key)) {
         continue;
       }
-
+      
       const value = plainObj[key];
       // Pass the correct seen map instance
       sanitized[key] = dataMiddleware._sanitizeObject(value, sensitiveFields, seen);
     }
-
+    
     return sanitized;
   },
   

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Button, Typography, Link, CircularProgress, Alert, Tooltip } from '@mui/material';
 import VideoCallIcon from '@mui/icons-material/VideoCall';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -9,10 +9,13 @@ import { toast } from 'react-toastify';
 const AppointmentMeetingLink = ({ appointment, onMeetingLinkGenerated }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  
-  // Check if appointment has a meeting link
-  const hasMeetingLink = !!(appointment.googleMeetLink || appointment.videoConferenceLink);
-  const meetingLink = appointment.googleMeetLink || appointment.videoConferenceLink;
+  const [currentMeetingLink, setCurrentMeetingLink] = useState(appointment?.googleMeetLink || appointment?.videoConferenceLink || null);
+
+  useEffect(() => {
+    setCurrentMeetingLink(appointment?.googleMeetLink || appointment?.videoConferenceLink || null);
+  }, [appointment?.googleMeetLink, appointment?.videoConferenceLink]);
+
+  const hasExistingLink = !!currentMeetingLink;
   
   const handleGenerateMeetingLink = async () => {
     if (!appointment || !appointment._id) {
@@ -24,19 +27,20 @@ const AppointmentMeetingLink = ({ appointment, onMeetingLinkGenerated }) => {
     setError(null);
     
     try {
-      // Call the backend endpoint to generate the meeting link
       const response = await axiosInstance.post(`/appointments/${appointment._id}/generate-meet-link`);
       
       if (response.data && response.data.success) {
-        toast.success('Google Meet link generated successfully!');
+        const newLink = response.data.data.meetLink;
+        const newEventId = response.data.data.eventId;
+        toast.success(hasExistingLink ? 'Google Meet link regenerated successfully!' : 'Google Meet link generated successfully!');
+        setCurrentMeetingLink(newLink);
         
-        // Update the appointment data via the callback
         if (onMeetingLinkGenerated) {
           onMeetingLinkGenerated({
             ...appointment,
-            googleMeetLink: response.data.data.meetLink,
-            videoConferenceLink: response.data.data.meetLink,
-            googleEventId: response.data.data.eventId
+            googleMeetLink: newLink,
+            videoConferenceLink: newLink,
+            googleEventId: newEventId
           });
         }
       } else {
@@ -53,7 +57,8 @@ const AppointmentMeetingLink = ({ appointment, onMeetingLinkGenerated }) => {
   };
   
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(meetingLink)
+    if (!currentMeetingLink) return;
+    navigator.clipboard.writeText(currentMeetingLink)
       .then(() => toast.success('Meeting link copied to clipboard'))
       .catch(() => toast.error('Failed to copy meeting link'));
   };
@@ -71,8 +76,24 @@ const AppointmentMeetingLink = ({ appointment, onMeetingLinkGenerated }) => {
         </Alert>
       )}
       
-      {hasMeetingLink ? (
-        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+      <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+         <Button
+            variant="contained"
+            startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <VideoCallIcon />}
+            onClick={handleGenerateMeetingLink}
+            disabled={loading}
+          >
+            {loading ? 'Generating...' : (hasExistingLink ? 'Regenerate Google Meet Link' : 'Generate Google Meet Link')}
+          </Button>
+         {hasExistingLink && (
+             <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                (Re)generates a new link, replacing the existing one.
+             </Typography>
+         )}
+      </Box>
+
+      {currentMeetingLink && (
+        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mt: 2 }}>
           <Typography 
             variant="body2" 
             component="div" 
@@ -90,42 +111,24 @@ const AppointmentMeetingLink = ({ appointment, onMeetingLinkGenerated }) => {
             }}
           >
             <Link 
-              href={meetingLink} 
+              href={currentMeetingLink} 
               target="_blank" 
               rel="noopener noreferrer"
               sx={{ display: 'inline-flex', alignItems: 'center' }}
             >
-              {meetingLink}
+              {currentMeetingLink}
               <OpenInNewIcon fontSize="small" sx={{ ml: 0.5 }} />
             </Link>
           </Typography>
           
           <Tooltip title="Copy meeting link">
-            <Button 
-              variant="outlined" 
-              startIcon={<ContentCopyIcon />}
-              onClick={handleCopyLink}
-              size="small"
-            >
+            <Button variant="outlined" startIcon={<ContentCopyIcon />} onClick={handleCopyLink} size="small" >
               Copy
             </Button>
           </Tooltip>
         </Box>
-      ) : (
-        <Box sx={{ mt: 1 }}>
-          <Button
-            variant="contained"
-            startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <VideoCallIcon />}
-            onClick={handleGenerateMeetingLink}
-            disabled={loading}
-          >
-            {loading ? 'Generating...' : 'Generate Google Meet Link'}
-          </Button>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-            Generate a Google Meet link for this virtual appointment
-          </Typography>
-        </Box>
       )}
+
     </Box>
   );
 };

@@ -56,7 +56,7 @@ const AuthWrapper = ({ children }) => {
 
   // List of paths that don't require authentication
   const publicRoutes = ['/', '/login', '/register', '/forgot-password', '/auth/error'];
-  
+
   // Special case for clinic-dashboard - requires clinic auth only
   if (location.pathname === '/clinic-dashboard' && !isClinicAuthenticated) {
     // Only redirect if explicitly trying to access clinic dashboard without clinic auth

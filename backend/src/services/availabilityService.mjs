@@ -528,25 +528,40 @@ class AvailabilityService {
    * @returns {Object|null} Overlapping time slot if found, null otherwise
    */
   async checkOverlappingTimeSlots(doctorId, date, startTime, endTime, excludeSlotId = null) {
+    console.log(`[checkOverlappingTimeSlots] Checking for doctor ${doctorId}, date ${date}, time ${startTime}-${endTime}, excluding ${excludeSlotId || 'none'}`);
     // Convert date to a Date object if it's not already
     const checkDate = new Date(date);
-    
-    // Set time to midnight to compare only the date part
-    const dateToCheck = new Date(checkDate.setHours(0, 0, 0, 0));
-    
+
+    // --- Corrected Date Handling ---
+    // Get the start of the day in UTC
+    const startOfDayUTC = new Date(checkDate);
+    startOfDayUTC.setUTCHours(0, 0, 0, 0);
+
+    // Get the start of the next day in UTC
+    const endOfDayUTC = new Date(startOfDayUTC);
+    endOfDayUTC.setUTCDate(startOfDayUTC.getUTCDate() + 1);
+    // --- End Corrected Date Handling ---
+
+    console.log(`[checkOverlappingTimeSlots] Normalized date for query range: ${startOfDayUTC.toISOString()} to ${endOfDayUTC.toISOString()}`);
+
     // Convert HH:MM time strings to minutes for easy comparison
     const startTimeMinutes = this._timeToMinutes(startTime);
     const endTimeMinutes = this._timeToMinutes(endTime);
+    console.log(`[checkOverlappingTimeSlots] New slot minutes: ${startTimeMinutes}-${endTimeMinutes}`);
     
     // Ensure end time is after start time
     if (endTimeMinutes <= startTimeMinutes) {
-      throw new Error('End time must be after start time');
+      // Use AppError for consistency
+      throw new AppError('End time must be after start time', 400); 
     }
     
-    // Create query to find overlapping slots
+    // Create query to find overlapping slots within the UTC day
     const query = {
       doctorId,
-      date: dateToCheck
+      date: {
+        $gte: startOfDayUTC,
+        $lt: endOfDayUTC
+      }
     };
     
     // Exclude the current slot ID if provided (for updates)
@@ -554,42 +569,37 @@ class AvailabilityService {
       query._id = { $ne: excludeSlotId };
     }
     
-    console.log(`Checking for overlaps: ${startTime}-${endTime} on ${dateToCheck.toISOString()}`);
+    console.log(`[checkOverlappingTimeSlots] Querying existing slots with: ${JSON.stringify(query)}`);
     
     // Find all slots for this doctor on this date
     const slotsOnDate = await TimeSlot.find(query);
-    console.log(`Found ${slotsOnDate.length} existing slots to check against`);
+    console.log(`[checkOverlappingTimeSlots] Found ${slotsOnDate.length} existing slots on this date to check against.`);
     
     // Check each slot for overlap
     for (const slot of slotsOnDate) {
       const slotStartMinutes = this._timeToMinutes(slot.startTime);
       const slotEndMinutes = this._timeToMinutes(slot.endTime);
       
-      console.log(`Comparing with existing slot: ${slot.startTime}-${slot.endTime} (${slotStartMinutes}-${slotEndMinutes} minutes)`);
-      console.log(`New slot: ${startTime}-${endTime} (${startTimeMinutes}-${endTimeMinutes} minutes)`);
+      console.log(`[checkOverlappingTimeSlots] Comparing new slot (${startTimeMinutes}-${endTimeMinutes}) with existing slot ID ${slot._id} (${slotStartMinutes}-${slotEndMinutes})`);
       
       // Check for any type of overlap:
-      // 1. New slot starts during existing slot
-      // 2. New slot ends during existing slot
-      // 3. New slot completely contains existing slot
-      // 4. New slot is completely contained within existing slot
       const overlap = (
         // New slot starts during existing slot
         (startTimeMinutes >= slotStartMinutes && startTimeMinutes < slotEndMinutes) ||
         // New slot ends during existing slot
         (endTimeMinutes > slotStartMinutes && endTimeMinutes <= slotEndMinutes) ||
         // New slot completely contains existing slot
-        (startTimeMinutes <= slotStartMinutes && endTimeMinutes >= slotEndMinutes) ||
-        // New slot is completely contained within existing slot
-        (startTimeMinutes >= slotStartMinutes && endTimeMinutes <= slotEndMinutes)
+        (startTimeMinutes <= slotStartMinutes && endTimeMinutes >= slotEndMinutes)
+        // Note: The case where new slot is contained within existing is covered by the first two conditions
       );
       
       if (overlap) {
-        console.log(`OVERLAP DETECTED: New slot ${startTime}-${endTime} overlaps with existing slot ${slot.startTime}-${slot.endTime}`);
-        return slot;
+        console.log(`[checkOverlappingTimeSlots] OVERLAP DETECTED with existing slot ID ${slot._id}`);
+        return slot; // Return the conflicting slot
       }
     }
     
+    console.log(`[checkOverlappingTimeSlots] No overlap detected.`);
     // No overlap found
     return null;
   }

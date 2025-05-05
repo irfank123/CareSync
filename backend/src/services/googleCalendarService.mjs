@@ -37,49 +37,45 @@ class GoogleCalendarService {
    * @param {Object} tokens - Optional direct token object if already authenticated
    * @returns {Promise<Object>} - The created event with meet link
    */
-  async createMeetingForAppointment(userId, appointmentId, tokens = null) {
-    console.log(`Creating Google Meet event for appointment ${appointmentId} by user ${userId}`);
+  async createMeetingForAppointment(userId, appointmentId, tokens = null, session = null) {
+    console.log(`Creating Google Meet event for appointment ${appointmentId} by user ${userId}` + (session ? ' within transaction' : ''));
     
     try {
-      let refreshToken = null;
-      
-      // Use provided tokens directly if available
       if (tokens && tokens.access_token) {
         console.log('Using directly provided access token');
         // Set the credentials directly with the provided tokens
         this.oAuth2Client.setCredentials(tokens);
       } else {
-        // Get the user to find their clinic
-        const user = await User.findById(userId).select('clinicId googleRefreshToken');
+        // --- Modified Token Retrieval Logic: Always use Clinic Token --- 
+        console.log(`[Meet Creation] Attempting to use Clinic token for user ${userId}`);
         
-        // First try to get the token from the user if they have one
-        if (user && user.googleRefreshToken) {
-          console.log('User has their own Google token, using that');
-          refreshToken = this.decryptToken(user.googleRefreshToken);
-        } 
-        // Otherwise, fall back to the clinic token
-        else if (user && user.clinicId) {
-          console.log('User does not have a Google token, trying to use clinic token');
-          const clinic = await Clinic.findById(user.clinicId).select('googleRefreshToken');
-          
-          if (!clinic || !clinic.googleRefreshToken) {
-            throw new Error('Neither user nor clinic has connected a Google account');
-          }
-          
-          refreshToken = this.decryptToken(clinic.googleRefreshToken);
-          console.log('Using clinic Google token instead');
-        } 
-        // If no user or clinic token is found
-        else {
-          throw new Error('No Google account connected - neither user nor clinic has a refresh token');
+        // Get the user ONLY to find their clinicId
+        const user = await User.findById(userId).select('clinicId');
+        if (!user || !user.clinicId) {
+          throw new Error('User not found or not associated with a clinic. Cannot determine which clinic token to use.');
         }
+        
+        console.log(`[Meet Creation] User belongs to clinic ${user.clinicId}. Fetching clinic token.`);
+        const clinic = await Clinic.findById(user.clinicId).select('googleRefreshToken');
+        
+        if (!clinic || !clinic.googleRefreshToken) {
+          // Error if the CLINIC has no token
+          console.error(`[Meet Creation] Clinic ${user.clinicId} has not connected a Google account.`);
+          throw new Error('The clinic has not connected a Google account. Please configure Google Calendar integration in clinic settings.');
+        }
+        
+        // Decrypt and use the clinic's refresh token
+        const refreshToken = this.decryptToken(clinic.googleRefreshToken);
+        console.log(`[Meet Creation] Using Google token from Clinic ${user.clinicId}.`);
         
         // Set the refresh token for this OAuth client
         this.oAuth2Client.setCredentials({ refresh_token: refreshToken });
+        // --- End Modified Token Retrieval Logic ---
       }
       
       // Get the appointment details with all necessary user information
-      const appointment = await Appointment.findById(appointmentId)
+      console.log(`[Meet Creation] Finding appointment ${appointmentId}` + (session ? ' using transaction session' : ''));
+      const appointmentQuery = Appointment.findById(appointmentId)
         .populate({ 
           path: 'patientId', 
           select: 'firstName lastName',
@@ -90,6 +86,12 @@ class GoogleCalendarService {
           select: 'firstName lastName',
           populate: { path: 'userId', select: 'email firstName lastName' }
         });
+        
+      if (session) {
+        appointmentQuery.session(session);
+      }
+      
+      const appointment = await appointmentQuery;
       
       if (!appointment) {
         throw new Error('Appointment not found');
@@ -180,11 +182,18 @@ class GoogleCalendarService {
         const googleMeetLink = response.data.hangoutLink;
         const googleEventId = response.data.id;
         
-        await Appointment.findByIdAndUpdate(appointmentId, {
+        console.log(`[Meet Creation] Updating appointment ${appointmentId} with Meet info` + (session ? ' using transaction session' : ''));
+        const updateQuery = Appointment.findByIdAndUpdate(appointmentId, {
           googleMeetLink,
           googleEventId,
           videoConferenceLink: googleMeetLink // For backward compatibility
         });
+        
+        if (session) {
+          updateQuery.session(session);
+        }
+        
+        await updateQuery;
         
         return {
           success: true,

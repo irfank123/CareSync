@@ -3,21 +3,47 @@
 import emailService from './emailService.mjs';
 import mongoose from 'mongoose';
 import config from '../config/config.mjs';
+import { AppError } from '../utils/errorHandler.mjs';
+import { google } from 'googleapis';
+import googleCalendarService from './googleCalendarService.mjs';
 
-// Import models directly from mongoose
-const Appointment = mongoose.model('Appointment');
-const TimeSlot = mongoose.model('TimeSlot');
-const User = mongoose.model('User');
-const Patient = mongoose.model('Patient');
-const Doctor = mongoose.model('Doctor');
-const Assessment = mongoose.model('Assessment');
-const AuditLog = mongoose.model('AuditLog');
-const Notification = mongoose.model('Notification');
+// --- Import ALL models from the central index --- 
+import {
+  Clinic,
+  Appointment,
+  TimeSlot,
+  User,
+  Patient,
+  Doctor,
+  Assessment,
+  AuditLog,
+  Notification
+} from '../models/index.mjs';
+// --- END Model Imports ---
 
 /**
  * Appointment Management Service
  */
 class AppointmentService {
+  constructor(models, googleCalendarService) {
+    if (!models || !models.Appointment || !models.TimeSlot || !models.User || !models.Patient || !models.Doctor || !models.AuditLog || !models.Notification || !models.Clinic || !models.Assessment) {
+      throw new Error('AppointmentService requires all models (Appointment, TimeSlot, User, Patient, Doctor, AuditLog, Notification, Clinic, Assessment) to be provided.');
+    }
+    if (!googleCalendarService) {
+      throw new Error('AppointmentService requires googleCalendarService to be provided.');
+    }
+    this.Appointment = models.Appointment;
+    this.TimeSlot = models.TimeSlot;
+    this.User = models.User;
+    this.Patient = models.Patient;
+    this.Doctor = models.Doctor;
+    this.Clinic = models.Clinic;
+    this.AuditLog = models.AuditLog;
+    this.Notification = models.Notification;
+    this.Assessment = models.Assessment;
+    this.googleCalendarService = googleCalendarService;
+  }
+
   /**
    * Get all appointments with filtering and pagination
    * @param {Object} options - Query options
@@ -426,92 +452,146 @@ class AppointmentService {
     }
   }
   
-/**
- * Create new appointment - refactored into smaller functions
- * @param {Object} appointmentData - Appointment data
- * @param {string} userId - User creating the appointment
- * @returns {Object} Created appointment
- */
-async createAppointment(appointmentData, userId) {
-    const session = await mongoose.startSession();
+  /**
+   * Create a new appointment and handle associated logic (e.g., mark timeslot)
+   * @param {Object} appointmentData - Data for the new appointment
+   * @param {string} createdByUserId - ID of the user creating the appointment
+   * @returns {Promise<Object>} The created appointment document
+   */
+  async createAppointment(appointmentData, createdByUserId) {
+    // Start session using a valid model, e.g., Appointment
+    const session = await this.Appointment.startSession();
     session.startTransaction();
-    
-    let createdAppointmentId = null;
-    let createdAssessmentId = null;
-
     try {
-      // Validate input data (ensure IDs are ObjectIds before passing here)
-      await this._validateAppointmentInputData(appointmentData);
-      
-      // 1. Create the Appointment record first, without the assessment ID yet
-      const initialAppointmentData = { ...appointmentData };
-      delete initialAppointmentData.assessment; // Remove assessment data for initial creation
-
-      const appointmentResult = await this._createAppointmentRecord(
-        initialAppointmentData, 
-        null, // Pass null for assessmentId initially
-        session
-      );
-      createdAppointmentId = appointmentResult[0]._id;
-      console.log(`Created initial appointment with ID: ${createdAppointmentId}`);
-
-      // 2. Create Assessment record IF assessment data was provided
-      if (appointmentData.assessment) {
-        createdAssessmentId = await this._createAssessmentIfProvided(
-          appointmentData, // Pass original data with assessment
-          createdAppointmentId, // Pass the newly created appointment ID
-          session
-        );
-        console.log(`Created assessment with ID: ${createdAssessmentId}`);
-
-        // 3. Update the Appointment with the Assessment ID
-        await Appointment.findByIdAndUpdate(
-          createdAppointmentId,
-          { preliminaryAssessmentId: createdAssessmentId },
-          { session }
-        );
-        console.log(`Updated appointment ${createdAppointmentId} with assessment ID ${createdAssessmentId}`);
+      // --- Fetch the single clinic ---
+      const singleClinic = await this.Clinic.findOne().session(session);
+      if (!singleClinic) {
+        throw new AppError('No clinic found in the database. Cannot create appointment.', 500);
       }
-      
-      // Update time slot status
-      await this._updateTimeSlotStatus(appointmentData.timeSlotId, 'booked', session);
-      
-      // Create audit log
-      await this._createAppointmentAuditLog(
-        userId, createdAppointmentId, appointmentData, session
-      );
-      
-      // Get patient and doctor for notifications
-      const { patient, doctor } = await this._getParticipants(
-        appointmentData.patientId, appointmentData.doctorId
-      );
-      
-      // Send notifications
-      await this._sendAppointmentNotifications(
-        appointmentResult[0], // Use the initially created appointment object
-        patient, 
-        doctor, 
-        'created', 
-        session
-      );
-      
-      // Commit the transaction
-      await session.commitTransaction();
-      
-      // Get the complete appointment with related data
-      return await this.getAppointmentById(createdAppointmentId);
-    } catch (error) {
-      // Abort transaction on error
-      await session.abortTransaction();
-      console.error('Create appointment error:', error);
-      // Add context about which record failed if possible
-      if (error.message.includes('Assessment validation failed') && createdAppointmentId && !createdAssessmentId) {
-         throw new Error(`Failed to create appointment: Error during assessment creation for appointment ${createdAppointmentId}. Details: ${error.message}`);
-      } else if (error.message.includes('Appointment validation failed')) {
-         throw new Error(`Failed to create appointment: Error during appointment record creation. Details: ${error.message}`);
+      const clinicId = singleClinic._id;
+      console.log(`[CreateAppointment] Found clinic ID: ${clinicId} to associate appointment with.`);
+      // --- End Fetch Clinic ---
+
+      // --- Validate and Convert IDs ---
+      const objectIdFields = ['patientId', 'doctorId', 'timeSlotId', 'preliminaryAssessmentId'];
+      objectIdFields.forEach(field => {
+        if (appointmentData[field] && !mongoose.Types.ObjectId.isValid(appointmentData[field])) {
+          throw new AppError(`Invalid format for ${field}`, 400);
+        }
+        if (appointmentData[field]) {
+          appointmentData[field] = new mongoose.Types.ObjectId(appointmentData[field]);
+        }
+      });
+      // --- End ID Validation ---
+
+      // --- Fetch and Validate TimeSlot ---
+      const timeSlot = await this.TimeSlot.findById(appointmentData.timeSlotId).session(session);
+      if (!timeSlot) {
+        throw new AppError('Selected time slot not found', 404);
+      }
+      if (timeSlot.isBooked) {
+        throw new AppError('Selected time slot is already booked', 409);
+      }
+      // --- End TimeSlot Validation ---
+
+      // --- Create the Appointment FIRST ---
+      // Pass the data directly to create
+      const appointment = await this.Appointment.create([{
+        ...appointmentData,
+        clinicId: clinicId,
+        status: 'scheduled'
+      }], { session }); 
+      // --- End Appointment Creation ---
+
+      // --- Update TimeSlot AFTER Appointment is created ---
+      timeSlot.status = 'booked';
+      timeSlot.bookedByAppointmentId = appointment[0]._id;
+      await timeSlot.save({ session });
+      // --- End TimeSlot update ---
+
+      console.log(`[CreateAppointment] Appointment ${appointment[0]._id} created and linked to clinic ${clinicId}`);
+
+      // --- Create audit log using this.AuditLog ---
+      await this.AuditLog.create([{
+        userId: createdByUserId,
+        action: 'create',
+        resource: 'appointment',
+        resourceId: appointment[0]._id,
+        details: appointmentData, // Consider filtering details
+      }], { session });
+      // --- End AuditLog ---
+
+      // --- BEGIN Auto Google Meet Link Generation ---
+      const createdAppointment = appointment[0]; // Get the created appointment document
+
+      // Check if the appointment is virtual and if the service is available
+      if (appointmentData.isVirtual !== false && this.googleCalendarService) { // Default to true if isVirtual is undefined/null
+        console.log(`[CreateAppointment] Virtual appointment detected (ID: ${createdAppointment._id}), attempting to generate Meet link.`);
+        try {
+          // --- Fetch Doctor's User ID for Google Auth --- 
+          const doctor = await this.Doctor.findById(createdAppointment.doctorId).select('userId').session(session);
+          if (!doctor || !doctor.userId) {
+            throw new Error(`Doctor record or associated user ID not found for doctorId: ${createdAppointment.doctorId}`);
+          }
+          const doctorUserId = doctor.userId.toString();
+          console.log(`[CreateAppointment] Found doctor's userId (${doctorUserId}) for Google Meet generation.`);
+          // --- End Fetch Doctor's User ID ---
+          
+          // Call the Google Calendar service to create the event and Meet link
+          // Pass the DOCTOR's user ID for authentication AND the current session
+          const googleEvent = await this.googleCalendarService.createMeetingForAppointment(
+            doctorUserId, // Use the DOCTOR's user ID to find their token
+            createdAppointment._id.toString(), // The ID of the appointment just created
+            null, // Pass null for tokens parameter (unless needed differently)
+            session // Pass the active transaction session
+          );
+
+          // If successful, update the appointment record with the Meet link and Event ID
+          if (googleEvent && googleEvent.hangoutLink) {
+            console.log(`[CreateAppointment] Google Meet link generated: ${googleEvent.hangoutLink}`);
+            // Update the document directly within the transaction
+            await this.Appointment.updateOne(
+              { _id: createdAppointment._id },
+              {
+                $set: {
+                  googleMeetLink: googleEvent.hangoutLink,
+                  googleEventId: googleEvent.id
+                }
+              },
+              { session } // Ensure this update is part of the transaction
+            );
+            console.log(`[CreateAppointment] Appointment ${createdAppointment._id} updated with Google Meet info.`);
+          } else {
+            console.warn(`[CreateAppointment] Google Meet link generation did not return a link for appointment ${createdAppointment._id}.`);
+          }
+        } catch (meetError) {
+          // Log the error but DO NOT abort the transaction
+          // The appointment is created, just the Meet link failed.
+          console.error(`[CreateAppointment] Failed to automatically generate Google Meet link for appointment ${createdAppointment._id}:`, meetError);
+          // Optionally: Add a notification or specific log entry about the failure
+        }
       } else {
-        throw new Error(`Failed to create appointment: ${error.message}`);
+        console.log(`[CreateAppointment] Appointment ${createdAppointment._id} is not virtual or Google Calendar Service is unavailable. Skipping Meet link generation.`);
       }
+      // --- END Auto Google Meet Link Generation ---
+
+      await session.commitTransaction();
+
+      // Populate necessary fields before returning
+      const populatedAppointment = await this.getAppointmentById(appointment[0]._id);
+      return populatedAppointment;
+
+    } catch (error) {
+      await session.abortTransaction();
+      console.error('Error creating appointment:', error);
+      // --- FIX Error Handling ---
+      // Rethrow specific AppErrors, wrap others
+      if (error instanceof AppError) {
+          throw error;
+      }
+      // Wrap other errors in AppError for consistent handling
+      throw new AppError(`Failed to create appointment: ${error.message}`, 500);
+      // --- END Fix Error Handling ---
     } finally {
       session.endSession();
     }
@@ -1508,4 +1588,25 @@ async createAppointment(appointmentData, userId) {
   }
 }
 
-export default new AppointmentService();
+// Instantiate the service with the imported models
+const models = {
+  Appointment,
+  TimeSlot,
+  User,
+  Patient,
+  Doctor,
+  Clinic,
+  AuditLog,
+  Notification,
+  Assessment
+};
+
+// --- ADD LOGGING HERE ---
+console.log('[AppointmentService Instantiation] Models being passed to constructor:', 
+  Object.keys(models).reduce((acc, key) => {
+    acc[key] = models[key] ? `Defined (Name: ${models[key].modelName})` : 'UNDEFINED';
+    return acc;
+  }, {}));
+// --- END LOGGING ---
+
+export default new AppointmentService(models, googleCalendarService);

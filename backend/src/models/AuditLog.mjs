@@ -7,10 +7,35 @@ const AuditLogSchema = new mongoose.Schema(
       ref: 'User',
       index: true
     },
+    clinicId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Clinic',
+      index: true
+    },
     action: {
       type: String,
-      enum: ['login', 'logout', 'view', 'create', 'update', 'delete', 'export'],
       required: true,
+      enum: [
+        'login', 
+        'logout',
+        'register',
+        'create', 
+        'update', 
+        'delete', 
+        'view', 
+        'verify_email', 
+        'reset_password', 
+        'forgot_password', 
+        'update_profile',
+        'update_password',
+        'mfa_enable', 
+        'mfa_disable',
+        'mfa_verify',
+        'auth0-login',
+        'clinic-login',
+        'clinic-register',
+        'clinic-verify',
+      ],
       index: true
     },
     resource: {
@@ -29,7 +54,9 @@ const AuditLogSchema = new mongoose.Schema(
         'my-appointments',
         'login', 
         'logout',
-        'register'
+        'register',
+        'patient-profile',
+        'patient-prescriptions'
       ]
     },
     resourceId: {
