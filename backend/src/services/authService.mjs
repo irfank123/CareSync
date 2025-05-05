@@ -78,6 +78,7 @@ class AuthService {
       console.log(`[RegisterUser] User created with ID: ${user[0]._id} and clinicId: ${user[0].clinicId}`);
 
       // Create role-specific record
+      let roleSpecificRecord = null;
       let RoleModel;
       let roleSpecificData = { 
         userId: user[0]._id,
@@ -85,53 +86,50 @@ class AuthService {
       };
       
       if (userType === 'patient') {
-        RoleModel = this.Patient;
-        // Assuming patient specific data comes flat or under patientData?
-        // Adjust if needed based on actual frontend data for patients
-        roleSpecificData = { ...roleSpecificData, ...(userData.patientData || {}) }; 
-        delete roleSpecificData.clinicId;
+        // Prepare patient data, extracting relevant fields from userData
+        const patientData = { 
+          userId: user[0]._id,
+          gender: userData.gender, // Add gender from userData
+          dateOfBirth: userData.dateOfBirth, // Add dateOfBirth from userData
+          // Add any other patient-specific fields from userData here
+          // e.g., address: userData.address, phoneNumber: userData.phoneNumber
+        };
+        console.log('[RegisterUser] Preparing to create patient record with data:', JSON.stringify(patientData, null, 2)); // Log the data being passed
+        roleSpecificRecord = await this.Patient.create([patientData], { session });
       } else if (userType === 'doctor') {
-        RoleModel = this.Doctor;
-        // --- Extract doctor fields directly from userData --- 
-        roleSpecificData.licenseNumber = userData.licenseNumber; 
-        roleSpecificData.specialties = userData.specialties; 
-        roleSpecificData.appointmentFee = userData.appointmentFee; // Optional, but extract if present
-        roleSpecificData.deaNumber = userData.deaNumber; // Optional
-        roleSpecificData.bio = userData.bio; // Optional
-        roleSpecificData.education = userData.education; // Optional
-        // Add any other fields expected by the Doctor model that come flat
-        // --- End Extraction --- 
+        // Prepare doctor data (if applicable)
+        const doctorData = { 
+          userId: user[0]._id,
+          clinicId: clinicId, // Ensure clinicId is added
+          licenseNumber: userData.licenseNumber, // Add licenseNumber
+          specialties: userData.specialties, // Add specialties (assuming it comes as an array)
+          appointmentFee: userData.appointmentFee, // Add appointmentFee (optional)
+          deaNumber: userData.deaNumber, // Add DEA number (optional)
+          bio: userData.bio, // Add bio (optional)
+          education: userData.education, // Add education (optional)
+          // Add any other doctor-specific fields from userData here
+        };
+        console.log('[RegisterUser] Preparing to create doctor record with data:', JSON.stringify(doctorData, null, 2));
+        // Remove undefined optional fields before creating
+        Object.keys(doctorData).forEach(key => {
+          if (doctorData[key] === undefined) {
+            delete doctorData[key];
+          }
+        });
+        roleSpecificRecord = await this.Doctor.create([doctorData], { session });
       } else if (userType === 'staff') {
-        RoleModel = this.Staff;
-        // --- Extract staff fields directly from userData --- 
-        roleSpecificData.position = userData.position;
-        roleSpecificData.department = userData.department;
-        // Add any other fields expected by the Staff model that come flat
-        // --- End Extraction ---
-      } else {
-        throw new AppError('Invalid user type for registration', 400);
+        // Prepare staff data (if applicable)
+        const staffData = {
+          userId: user[0]._id,
+          department: userData.department, // Example: Add department
+          // Add other staff-specific fields
+        };
+        roleSpecificRecord = await this.Staff.create([staffData], { session });
       }
       
-      // Remove undefined fields before creating
-      Object.keys(roleSpecificData).forEach(key => {
-        if (roleSpecificData[key] === undefined) {
-          delete roleSpecificData[key];
-        }
-      });
+      console.log(`[RegisterUser] Role-specific record created for type: ${userType}`);
 
-      console.log(`[RegisterUser] Preparing to create ${userType} record with data:`, JSON.stringify(roleSpecificData, null, 2));
-
-      const roleSpecificRecord = await RoleModel.create([roleSpecificData], { session });
-      console.log(`[RegisterUser] ${userType} record created with ID: ${roleSpecificRecord[0]._id} and clinicId: ${roleSpecificRecord[0].clinicId}`);
-
-      // Generate token (include clinicId if user has it)
-      let tokenOptions = {};
-      if (user[0].clinicId) {
-        tokenOptions.clinicId = user[0].clinicId;
-      }
-      const token = this._generateToken(user[0]._id, user[0].role, tokenOptions);
-
-      // Create audit log
+      // Create audit log entry
       await this.AuditLog.create([{
         userId: user[0]._id,
         action: 'register',
@@ -142,6 +140,13 @@ class AuthService {
           email: user[0].email
         }
       }], { session });
+
+      // Generate token (include clinicId if user has it)
+      let tokenOptions = {};
+      if (user[0].clinicId) {
+        tokenOptions.clinicId = user[0].clinicId;
+      }
+      const token = this._generateToken(user[0]._id, user[0].role, tokenOptions);
 
       // Commit the transaction
       await session.commitTransaction();
