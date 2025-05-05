@@ -227,37 +227,71 @@ class PrescriptionService {
    */
   async getMyPrescriptions(userId) {
     // 1. Find the patient record associated with the user ID
-    const patient = await Patient.findOne({ userId }).select('_id').lean(); // Only need the patient's _id, use lean()
+    const patient = await Patient.findOne({ userId }).select('_id').lean();
     if (!patient) {
       console.log(`getMyPrescriptions: Patient record not found for userId: ${userId}`);
-      return []; // Return empty array if patient record doesn't exist
+      return [];
     }
 
-    // 2. Find prescriptions for that patientId, populate doctor details
+    // 2. Find prescriptions for that patientId, selecting necessary fields
     const prescriptions = await Prescription.find({ patientId: patient._id })
-      .populate({
-          path: 'doctorId',
-          select: 'specialization userId', // Correct: Select 'userId' and other needed Doctor fields
-          populate: {
-              path: 'userId', // Correct: Populate the field named 'userId'
-              model: 'User', // Specify model for nested populate
-              select: 'firstName lastName title' // Select necessary User fields
-          }
-      })
-      .sort({ issueDate: -1 }); // Sort by most recent first
+      .select('_id patientId doctorId medications status prescriptionDate createdAt updatedAt expirationDate verificationCode') // Select fields needed
+      .sort({ prescriptionDate: -1 }) // Sort by original date field
+      .lean(); // Use lean
 
-    // 3. Clean up and return plain objects (or use .lean() on the find query)
+    if (!prescriptions || prescriptions.length === 0) {
+        return [];
+    }
+
+    // 3. Collect unique doctor IDs
+    const doctorIds = [...new Set(prescriptions.map(p => p.doctorId?.toString()).filter(id => id))];
+
+    // 4. Fetch corresponding Doctor documents and populate their User details
+    const doctors = await Doctor.find({ '_id': { $in: doctorIds } })
+        .select('_id userId specialization') // Select fields needed from Doctor
+        .populate({ 
+            path: 'userId', 
+            model: 'User', 
+            select: 'firstName lastName title' // Select fields needed from User
+        })
+        .lean();
+
+    // 5. Create a lookup map for doctor details
+    const doctorDetailsMap = doctors.reduce((map, doc) => {
+        if (doc.userId) {
+            map[doc._id.toString()] = {
+                name: `${doc.userId.title || 'Dr.'} ${doc.userId.firstName || ''} ${doc.userId.lastName || ''}`.trim(),
+                specialization: doc.specialization || 'N/A'
+            };
+        } else {
+             map[doc._id.toString()] = {
+                name: 'Unknown Doctor (User not found)',
+                specialization: doc.specialization || 'N/A'
+            };
+        }
+        return map;
+    }, {});
+    
+    console.log('[Service getMyPrescriptions] Doctor Details Map:', doctorDetailsMap);
+
+    // 6. Map prescriptions to the final format
     return prescriptions.map(p => {
-        const presJson = p.toJSON(); // Use toJSON to include virtuals if any
-        const doctorUser = presJson.doctorId?.userId; // Correct: Access populated user via 'userId'
-        const doctor = presJson.doctorId;
-        presJson.doctorName = doctorUser 
-            ? `${doctorUser.title || 'Dr.'} ${doctorUser.firstName || ''} ${doctorUser.lastName || ''}`.trim()
-            : 'Unknown Doctor';
-        presJson.doctorSpecialization = doctor?.specialization || 'N/A';
-        // Optionally remove populated fields if not needed
-        // delete presJson.doctorId;
-        return presJson;
+        const doctorDetails = doctorDetailsMap[p.doctorId?.toString()] || { name: 'Unknown Doctor', specialization: 'N/A' };
+        
+        const finalPrescription = {
+            ...p,
+            issueDate: p.prescriptionDate, // Rename date field
+            doctorName: doctorDetails.name,
+            doctorSpecialization: doctorDetails.specialization,
+        };
+        
+        // Clean up fields
+        delete finalPrescription.prescriptionDate;
+        delete finalPrescription.doctorId;
+        
+        console.log(`[Service getMyPrescriptions] Mapped prescription for response:`, JSON.stringify(finalPrescription, null, 2));
+
+        return finalPrescription;
     });
   }
 }

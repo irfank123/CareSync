@@ -115,19 +115,7 @@ const PatientDetails = () => {
                email: populatedUser?.email || 'N/A',
                phoneNumber: populatedUser?.phoneNumber || 'N/A',
                
-               // Validate and format DOB from rawPatientData
-               dobFormatted: (() => {
-                   const dob = rawPatientData?.dateOfBirth;
-                   try {
-                       const dateObj = new Date(dob);
-                       if (dob && !isNaN(dateObj.getTime())) {
-                           return format(dateObj, 'MM/dd/yyyy');
-                       }
-                   } catch (e) {
-                       console.error("Error parsing dateOfBirth:", dob, e);
-                   }
-                   return 'N/A'; // Return N/A if invalid or missing
-               })(),
+               // REMOVED dobFormatted calculation
            };
           console.log("Processed patient data:", patientData); // Log processed data
           setPatient(patientData);
@@ -223,7 +211,6 @@ const PatientDetails = () => {
             <Divider sx={{ mb: 2 }} />
             <Typography variant="body1"><strong>Email:</strong> {patient.email}</Typography>
             <Typography variant="body1"><strong>Phone:</strong> {patient.phoneNumber}</Typography>
-            <Typography variant="body1"><strong>Date of Birth:</strong> {patient.dobFormatted}</Typography>
             <Typography variant="body1"><strong>Gender:</strong> {patient.gender || 'N/A'}</Typography>
             {/* Add more patient details as needed */}
           </Paper>
