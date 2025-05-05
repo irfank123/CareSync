@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Container,
   Typography,
@@ -28,8 +28,9 @@ const steps = ['Report Symptoms', 'Answer Questions', 'Assessment Submitted'];
  * Main assessment page component for the AI-driven workflow
  */
 const Assessment = () => {
-  const { appointmentId } = useParams(); // We primarily need appointmentId
+  const { patientId: patientIdFromParams, appointmentId: appointmentIdFromParams } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Component state
   const [activeStep, setActiveStep] = useState(0);
@@ -40,7 +41,13 @@ const Assessment = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // No useEffect needed to load existing assessment in this flow
+  // Get IDs from query params for /new route, or from path params otherwise
+  const queryParams = new URLSearchParams(location.search);
+  const appointmentId = appointmentIdFromParams || queryParams.get('appointmentId');
+  const patientId = patientIdFromParams || queryParams.get('patientId');
+
+  console.log('[Assessment] Using appointmentId:', appointmentId);
+  console.log('[Assessment] Using patientId:', patientId);
 
   /**
    * Handle next step button click (from SymptomInput)
@@ -55,11 +62,16 @@ const Assessment = () => {
     try {
       setLoading(true);
       // Call the new startAssessment service method
-      const response = await assessmentService.startAssessment(appointmentId, symptoms);
+      const response = await assessmentService.createAssessment({
+        patientId: patientId,       // Use patientId from URL
+        appointmentId: appointmentId, // Pass appointmentId if needed by backend
+        symptoms: symptoms        // Pass symptoms from state
+      });
       
-      // Check if response and data exist and contain expected fields
-      if (response && response.data && response.data.data) {
-        const { assessmentId: newAssessmentId, questions: generatedQuestions } = response.data.data;
+      // Check if response contains the expected 'data' property with assessment details
+      if (response && response.data && response.data.assessmentId && response.data.questions) { 
+        // Destructure directly from response.data
+        const { assessmentId: newAssessmentId, questions: generatedQuestions } = response.data;
         
         if (!newAssessmentId || !Array.isArray(generatedQuestions)) {
            console.error('Invalid data structure from startAssessment:', response.data.data);
@@ -111,8 +123,9 @@ const Assessment = () => {
       // Call the new submitAnswers service method
       const response = await assessmentService.submitAnswers(assessmentId, answers);
 
-      if (response && response.data && response.data.data) {
-        setCompletedAssessment(response.data.data); // Store the final assessment data
+      // Check if response has the expected 'data' property containing the completed assessment
+      if (response && response.data && response.data._id) { // Check for response.data._id as confirmation
+        setCompletedAssessment(response.data); // Store the final assessment data directly from response.data
         setActiveStep(2); // Move to final step
       } else {
          console.error('Invalid response structure from submitAnswers:', response);

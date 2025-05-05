@@ -118,12 +118,20 @@ function App() {
                     } 
                   />
                   <Route 
-                    path="/assessment/:patientId/:appointmentId" 
+                    path="/assessment/new"
                     element={
                       <ProtectedRoute roles={['patient']}>
                         <Assessment />
                       </ProtectedRoute>
-                    } 
+                    }
+                  />
+                  <Route 
+                    path="/assessment/:patientId/:appointmentId"
+                    element={
+                      <ProtectedRoute roles={['patient']}>
+                        <Assessment />
+                      </ProtectedRoute>
+                    }
                   />
                   <Route 
                     path="/doctors" 

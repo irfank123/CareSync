@@ -44,6 +44,7 @@ const authMiddleware = {
     try {
       // Extract token
       const token = authMiddleware._extractToken(req);
+      console.log(`[AuthMiddleware] Extracted Token: ${token ? token.substring(0, 10) + '...' : 'None'}`);
       
       if (!token) {
         return res.status(401).json({ 
@@ -54,6 +55,7 @@ const authMiddleware = {
       
       // Check if token is blacklisted
       const isBlacklisted = await tokenBlacklistService.isBlacklisted(token);
+      console.log(`[AuthMiddleware] Is token blacklisted: ${isBlacklisted}`);
       if (isBlacklisted) {
         return res.status(401).json({
           success: false,
@@ -63,6 +65,7 @@ const authMiddleware = {
       
       // Verify token
       const decoded = jwt.verify(token, config.jwt.secret);
+      console.log(`[AuthMiddleware] Token verified. Decoded payload:`, decoded);
       
       // Check token type (user or clinic)
       if (decoded.type === 'clinic') {
@@ -103,6 +106,7 @@ const authMiddleware = {
       } else {
         // Handle regular user token
         const user = await User.findById(decoded.id);
+        console.log(`[AuthMiddleware] User found by ID (${decoded.id}): ${user ? 'Yes' : 'No'}`);
         
         if (!user) {
           return res.status(401).json({ 
@@ -113,27 +117,36 @@ const authMiddleware = {
         
         // Check if user is active
         if (!user.isActive) {
+          console.log(`[AuthMiddleware] User ${user._id} is NOT active.`);
           return res.status(401).json({ 
             success: false,
             message: 'Your account has been deactivated'
           });
         }
         
+        console.log(`[AuthMiddleware] User ${user._id} is active.`);
+        
         // Check if account is locked
         if (user.isAccountLocked && user.isAccountLocked()) {
+          console.log(`[AuthMiddleware] User ${user._id} account IS locked.`);
           return res.status(401).json({ 
             success: false,
             message: 'Your account has been temporarily locked due to too many failed login attempts'
           });
         }
         
+        console.log(`[AuthMiddleware] User ${user._id} account is NOT locked.`);
+        
         // Check token issued time against password change time (if password was changed)
         if (user.passwordChangedAt && user.changedPasswordAfter(decoded.iat)) {
+          console.log(`[AuthMiddleware] User ${user._id} password changed AFTER token was issued.`);
           return res.status(401).json({ 
             success: false,
             message: 'Password was recently changed. Please log in again'
           });
         }
+        
+        console.log(`[AuthMiddleware] User ${user._id} password NOT changed after token issuance (or never changed).`);
         
         // Add user to request
         req.user = user;
@@ -173,6 +186,8 @@ const authMiddleware = {
           tokenExpires: new Date(decoded.exp * 1000)
         };
       }
+      
+      console.log(`[AuthMiddleware] Authentication successful for user: ${req.user?._id}`);
       
       next();
     } catch (error) {

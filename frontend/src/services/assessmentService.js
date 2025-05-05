@@ -1,10 +1,9 @@
-import axios from 'axios';
-import { API_BASE_URL } from '../config';
+import { axiosInstance } from './api'; // Import the configured Axios instance
 
 // Get all assessments
 export const getAllAssessments = async (params = {}) => {
   try {
-    const response = await axios.get(`${API_BASE_URL}/assessments`, { params });
+    const response = await axiosInstance.get('/assessments', { params });
     return response.data;
   } catch (error) {
     console.error('Error fetching assessments:', error);
@@ -15,7 +14,7 @@ export const getAllAssessments = async (params = {}) => {
 // Get assessments for a specific patient
 export const getPatientAssessments = async (patientId, params = {}) => {
   try {
-    const response = await axios.get(`${API_BASE_URL}/patients/${patientId}/assessments`, { params });
+    const response = await axiosInstance.get(`/patients/${patientId}/assessments`, { params });
     return response.data;
   } catch (error) {
     console.error(`Error fetching assessments for patient ${patientId}:`, error);
@@ -26,7 +25,7 @@ export const getPatientAssessments = async (patientId, params = {}) => {
 // Get a specific assessment by ID
 export const getAssessmentById = async (assessmentId) => {
   try {
-    const response = await axios.get(`${API_BASE_URL}/assessments/${assessmentId}`);
+    const response = await axiosInstance.get(`/assessments/${assessmentId}`);
     return response.data;
   } catch (error) {
     console.error(`Error fetching assessment with ID ${assessmentId}:`, error);
@@ -34,21 +33,35 @@ export const getAssessmentById = async (assessmentId) => {
   }
 };
 
-// Create a new assessment
+// Create a new assessment (start the process)
 export const createAssessment = async (assessmentData) => {
   try {
-    const response = await axios.post(`${API_BASE_URL}/assessments`, assessmentData);
+    // Extract patientId for the URL and send the rest in the body
+    const { patientId, ...bodyData } = assessmentData;
+    if (!patientId) {
+      throw new Error('Patient ID is missing for createAssessment call');
+    }
+    // Log token existence before making the call
+    const tokenExists = !!localStorage.getItem('token');
+    console.log(`[createAssessment] Token exists in localStorage just before API call: ${tokenExists}`);
+    
+    // Construct the URL with patientId
+    const url = `/patients/${patientId}/assessments/start`;
+    console.log(`Calling createAssessment endpoint: POST ${url}`);
+    const response = await axiosInstance.post(url, bodyData);
     return response.data;
   } catch (error) {
-    console.error('Error creating assessment:', error);
-    throw error;
+    console.error('Error creating assessment:', error.response?.data || error.message);
+    // Re-throw a more specific error if possible
+    const errorMessage = error.response?.data?.message || error.message || 'Failed to start assessment.';
+    throw new Error(errorMessage);
   }
 };
 
 // Update an existing assessment
 export const updateAssessment = async (assessmentId, assessmentData) => {
   try {
-    const response = await axios.put(`${API_BASE_URL}/assessments/${assessmentId}`, assessmentData);
+    const response = await axiosInstance.put(`/assessments/${assessmentId}`, assessmentData);
     return response.data;
   } catch (error) {
     console.error(`Error updating assessment with ID ${assessmentId}:`, error);
@@ -59,10 +72,22 @@ export const updateAssessment = async (assessmentId, assessmentData) => {
 // Delete an assessment
 export const deleteAssessment = async (assessmentId) => {
   try {
-    const response = await axios.delete(`${API_BASE_URL}/assessments/${assessmentId}`);
+    const response = await axiosInstance.delete(`/assessments/${assessmentId}`);
     return response.data;
   } catch (error) {
     console.error(`Error deleting assessment with ID ${assessmentId}:`, error);
+    throw error;
+  }
+};
+
+// Submit answers (using update for now, assuming it takes responses)
+export const submitAnswers = async (assessmentId, answersData) => {
+  try {
+    // Backend route is /:id/responses, expects { answers: [...] } in body
+    const response = await axiosInstance.post(`/assessments/${assessmentId}/responses`, { answers: answersData });
+    return response.data;
+  } catch (error) {
+    console.error(`Error submitting answers for assessment ${assessmentId}:`, error);
     throw error;
   }
 };
@@ -73,5 +98,6 @@ export default {
   getAssessmentById,
   createAssessment,
   updateAssessment,
-  deleteAssessment
+  deleteAssessment,
+  submitAnswers
 }; 

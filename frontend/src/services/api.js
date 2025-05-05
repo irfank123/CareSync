@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { safeObjectId } from '../utils/stringUtils';
 import Cookies from 'js-cookie';
-import { toast } from 'react-toastify';
+import assessmentServiceDefault from './assessmentService'; // Import the default export
 
 // Validate environment variables
 if (!process.env.REACT_APP_API_URL) {
@@ -302,5 +302,8 @@ export const doctorService = {
     return api.put(`/doctors/${safeId}`, profileData);
   },
 };
+
+// Export the imported assessment service functions
+export const assessmentService = assessmentServiceDefault;
 
 export default api;

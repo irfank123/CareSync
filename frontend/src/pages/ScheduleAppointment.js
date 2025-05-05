@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -18,7 +18,6 @@ import {
   Grid,
   Card,
   CardContent,
-  CardActions,
   TextField,
   Alert,
   CircularProgress,
@@ -35,15 +34,14 @@ import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { format } from 'date-fns';
 import { API_BASE_URL } from '../config';
 import { extractObjectId } from '../utils/objectIdHelper';
-import SymptomInput from '../components/assessment/SymptomInput';
 import QuestionForm from '../components/assessment/QuestionForm';
+import { assessmentService } from '../services/api'; // Import assessment service
 
 const steps = [
   'Select Appointment Type',
   'Choose Doctor',
   'Select Date & Time',
-  'Preliminary Symptoms',
-  'AI Assessment Questionnaire',
+  'Reason for Visit',
   'Confirm Details',
 ];
 
@@ -65,26 +63,10 @@ const ScheduleAppointment = () => {
   const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
   const [assessment, setAssessment] = useState({
     symptoms: '',
-    duration: '',
-    severity: 'mild',
     additionalNotes: '',
   });
   const [error, setError] = useState('');
-  
-  // New state for AI assessment
-  const [assessmentId, setAssessmentId] = useState(null);
-  const [questions, setQuestions] = useState([]);
-  const [answers, setAnswers] = useState([]);
-  const [assessmentReport, setAssessmentReport] = useState(null);
-  
-  // Timer state
-  const [assessmentStartTime, setAssessmentStartTime] = useState(null);
-  const [timeRemaining, setTimeRemaining] = useState(10 * 60); // 10 minutes in seconds
-  const [showTimeWarning, setShowTimeWarning] = useState(false);
-  const [showTimeExpired, setShowTimeExpired] = useState(false);
-  const [showFinalPrompt, setShowFinalPrompt] = useState(false);
-  const [preferToDiscussWithDoctor, setPreferToDiscussWithDoctor] = useState(false);
-  const timerRef = useRef(null);
+  const [patientId, setPatientId] = useState(null); // Add state for patientId
 
   // Helper function to get doctor name
   const getDoctorName = (doctor) => {
@@ -155,6 +137,34 @@ const ScheduleAppointment = () => {
     fetchDoctors();
   }, []);
 
+  // Fetch patient ID when component mounts
+  useEffect(() => {
+    const fetchPatientId = async () => {
+      try {
+        const patientResponse = await fetch(`${API_BASE_URL}/patients/me`, {
+          headers: getAuthHeaders(),
+        });
+        if (!patientResponse.ok) {
+          throw new Error('Failed to retrieve patient information for assessment');
+        }
+        const patientData = await patientResponse.json();
+        const extractedId = extractObjectId(patientData.data);
+        if (!extractedId) {
+           throw new Error('Failed to extract valid patient ID for assessment');
+        }
+        console.log('[ScheduleAppointment] Fetched patientId:', extractedId);
+        setPatientId(extractedId);
+      } catch (err) {
+        console.error('Error fetching patient ID:', err);
+        setError('Could not load necessary patient information. Please refresh.');
+      }
+    };
+    
+    if (user) { // Only fetch if user is logged in
+      fetchPatientId();
+    }
+  }, [user]);
+
   // Fetch available timeslots when doctor and date are selected
   useEffect(() => {
     const fetchTimeSlots = async () => {
@@ -214,87 +224,6 @@ const ScheduleAppointment = () => {
     }
   }, [selectedDoctor, selectedDate]);
 
-  // Start timer when entering the AI assessment step
-  useEffect(() => {
-    if (activeStep === 4) { // AI Assessment step
-      // Initialize timer on step entry
-      if (!assessmentStartTime) {
-        setAssessmentStartTime(Date.now());
-      }
-      
-      // Clear any existing timer
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-      
-      // Set up the timer to update every second
-      timerRef.current = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - (assessmentStartTime || Date.now())) / 1000);
-        const remaining = Math.max(0, 10 * 60 - elapsed); // 10 minutes in seconds
-        
-        setTimeRemaining(remaining);
-        console.log('Timer update: ', remaining);
-        
-        // Warning at 9:45 (15 seconds remaining)
-        if (remaining <= 15 && remaining > 0 && !showTimeWarning) {
-          setShowTimeWarning(true);
-        }
-        
-        // First timeout at 10:00 (0 seconds remaining)
-        if (remaining === 0 && !showTimeExpired) {
-          setShowTimeExpired(true);
-          // Don't clear the interval yet, we still need to track for the 10:30 mark
-        }
-        
-        // Final prompt at 10:30 (30 seconds after initial timeout)
-        if (elapsed >= 10 * 60 + 30 && !showFinalPrompt) {
-          setShowFinalPrompt(true);
-          clearInterval(timerRef.current);
-          // Auto-save assessment progress here
-          handleAutoSaveAssessment();
-        }
-      }, 1000);
-    } else {
-      // Clear timer when leaving the AI assessment step
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-    }
-    
-    // Cleanup on component unmount
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [activeStep, assessmentStartTime]); // Don't include state vars that change every tick
-
-  // Format timer for display (MM:SS)
-  const formatTime = (timeInSeconds) => {
-    const minutes = Math.floor(timeInSeconds / 60);
-    const seconds = timeInSeconds % 60;
-    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-  };
-  
-  // Handle auto-save of assessment when timer expires
-  const handleAutoSaveAssessment = () => {
-    // Logic to save current assessment progress
-    console.log('Auto-saving assessment progress...');
-    // If there are partial answers, save them
-    if (answers.length > 0) {
-      // We would typically call an API here
-      console.log('Saving partial answers:', answers);
-    }
-  };
-  
-  // Handle "Prefer to discuss with doctor" option
-  const handlePreferToDiscuss = () => {
-    setPreferToDiscussWithDoctor(true);
-    setShowTimeExpired(false);
-    setShowFinalPrompt(false);
-    
-    // Skip to confirmation step
-    setActiveStep(5); // Assuming 5 is the Confirm Details step
-  };
-
   const handleNext = () => {
     if (validateCurrentStep()) {
       setActiveStep((prevStep) => prevStep + 1);
@@ -328,16 +257,15 @@ const ScheduleAppointment = () => {
         }
         break;
       case 3:
+        // Optional: Add validation for the new 'Reason for Visit' step if needed
+        // if (!assessment.symptoms && !assessment.additionalNotes) {
+        //   setError('Please provide a reason or notes');
+        //   return false;
+        // }
+        break;
+      case 4:
         if (!assessment.symptoms) {
           setError('Please describe your symptoms');
-          return false;
-        }
-        break;
-      // AI Questionnaire step validation
-      case 4:
-        // We can validate this step differently - either all questions answered or 'preferToDiscussWithDoctor' selected
-        if (!preferToDiscussWithDoctor && answers.length < questions.length) {
-          setError('Please answer all questions or select "Prefer to discuss with doctor"');
           return false;
         }
         break;
@@ -347,306 +275,10 @@ const ScheduleAppointment = () => {
     return true;
   };
 
-  // Define the handler for assessment input changes
-  const handleAssessmentChange = (event) => {
+  // Basic handler for symptom/notes input changes
+  const handleAssessmentInputChange = (event) => {
     const { name, value } = event.target;
     setAssessment(prev => ({ ...prev, [name]: value }));
-  };
-
-  // Start the AI assessment after entering basic symptoms
-  const handleStartAIAssessment = async () => {
-    if (!assessment.symptoms) {
-      setError('Please enter at least one symptom before continuing.');
-      return;
-    }
-    
-    try {
-      setLoading(true);
-      setError('');
-      
-      // Reset timer state when starting a new assessment
-      setAssessmentStartTime(null);
-      setTimeRemaining(10 * 60);
-      setShowTimeWarning(false);
-      setShowTimeExpired(false);
-      setShowFinalPrompt(false);
-      
-      // Make API call to start assessment and get questions
-      // This would be similar to what's in Assessment.js
-      // For now, simulate with dummy data
-      setTimeout(() => {
-        // More comprehensive medical assessment questions that adapt to the symptoms
-        const symptomText = assessment.symptoms.toLowerCase();
-        
-        // Build a more comprehensive set of questions based on symptoms
-        const generalQuestions = [
-          { 
-            questionId: 'q1', 
-            question: 'When did your symptoms first begin?', 
-            answerType: 'text',
-            required: true 
-          },
-          { 
-            questionId: 'q2', 
-            question: 'Have you taken any medication for these symptoms? If yes, please specify.',
-            answerType: 'text',
-            required: true
-          },
-          { 
-            questionId: 'q3', 
-            question: 'Do you have any known allergies or chronic medical conditions?',
-            answerType: 'text',
-            required: true
-          },
-          { 
-            questionId: 'q4', 
-            question: 'On a scale of 1-10, how would you rate your overall discomfort?',
-            answerType: 'scale',
-            required: true
-          },
-          { 
-            questionId: 'q5', 
-            question: 'Have you experienced similar symptoms in the past?',
-            answerType: 'boolean',
-            required: true
-          }
-        ];
-        
-        // Add symptom-specific questions based on keywords
-        const specificQuestions = [];
-        
-        if (symptomText.includes('headache') || symptomText.includes('head pain') || 
-            symptomText.includes('migraine')) {
-          specificQuestions.push(
-            { 
-              questionId: 'head1', 
-              question: 'Is your headache on one side or both sides of your head?',
-              answerType: 'text',
-              required: true
-            },
-            { 
-              questionId: 'head2', 
-              question: 'Does light or sound sensitivity accompany your headache?',
-              answerType: 'boolean',
-              required: true
-            },
-            { 
-              questionId: 'head3', 
-              question: 'Have you experienced nausea or vomiting with your headache?',
-              answerType: 'boolean',
-              required: true
-            }
-          );
-        }
-        
-        if (symptomText.includes('fever') || symptomText.includes('temperature')) {
-          specificQuestions.push(
-            { 
-              questionId: 'fever1', 
-              question: 'What is your current temperature, if known?',
-              answerType: 'text',
-              required: false
-            },
-            { 
-              questionId: 'fever2', 
-              question: 'Are you experiencing chills or sweating?',
-              answerType: 'boolean',
-              required: true
-            },
-            { 
-              questionId: 'fever3', 
-              question: 'Have you been in contact with anyone who has been sick recently?',
-              answerType: 'boolean',
-              required: true
-            }
-          );
-        }
-        
-        if (symptomText.includes('pain') || symptomText.includes('ache')) {
-          specificQuestions.push(
-            { 
-              questionId: 'pain1', 
-              question: 'Does anything make the pain better or worse?',
-              answerType: 'text',
-              required: true
-            },
-            { 
-              questionId: 'pain2', 
-              question: 'Is the pain constant or does it come and go?',
-              answerType: 'text',
-              required: true
-            },
-            { 
-              questionId: 'pain3', 
-              question: 'On a scale of 1-10, how severe is your pain?',
-              answerType: 'scale',
-              required: true
-            }
-          );
-        }
-        
-        if (symptomText.includes('cough') || symptomText.includes('cold') || 
-            symptomText.includes('congestion') || symptomText.includes('sore throat')) {
-          specificQuestions.push(
-            { 
-              questionId: 'resp1', 
-              question: 'Are you producing any phlegm or mucus? If yes, what color?',
-              answerType: 'text',
-              required: true
-            },
-            { 
-              questionId: 'resp2', 
-              question: 'Are you experiencing shortness of breath?',
-              answerType: 'boolean',
-              required: true
-            },
-            { 
-              questionId: 'resp3', 
-              question: 'Have you had a COVID-19 test recently? If yes, what was the result?',
-              answerType: 'text',
-              required: true
-            }
-          );
-        }
-        
-        if (symptomText.includes('stomach') || symptomText.includes('nausea') || 
-            symptomText.includes('vomit') || symptomText.includes('diarrhea')) {
-          specificQuestions.push(
-            { 
-              questionId: 'gi1', 
-              question: 'Have you experienced any changes in your appetite?',
-              answerType: 'boolean',
-              required: true
-            },
-            { 
-              questionId: 'gi2', 
-              question: 'When was the last time you had a bowel movement? Was it normal?',
-              answerType: 'text',
-              required: true
-            },
-            { 
-              questionId: 'gi3', 
-              question: 'Have you consumed any unusual foods in the past 48 hours?',
-              answerType: 'boolean',
-              required: true
-            }
-          );
-        }
-        
-        // Ensure we have at least 8-10 questions by adding general ones if needed
-        const allQuestions = [
-          ...generalQuestions,
-          ...specificQuestions,
-          { 
-            questionId: 'final1', 
-            question: 'Is there anything else you would like to share with your doctor?',
-            answerType: 'text',
-            required: false
-          }
-        ];
-        
-        console.log('Generated questions based on symptoms:', allQuestions);
-        
-        setQuestions(allQuestions);
-        setAssessmentId('dummy-assessment-id');
-        setActiveStep(4); // Move to AI questionnaire step
-        setLoading(false);
-      }, 1500);
-      
-      // In actual implementation:
-      // const response = await assessmentService.startAssessment(patientId, appointmentId, symptoms);
-      // setQuestions(response.data.data.questions);
-      // setAssessmentId(response.data.data.assessmentId);
-      // setActiveStep(4);
-      
-    } catch (err) {
-      console.error('Error starting assessment:', err);
-      setError('Failed to start assessment. Please try again.');
-      setLoading(false);
-    }
-  };
-  
-  // Handle answers from the QuestionForm component
-  const handleQuestionSubmit = async (submittedAnswers) => {
-    try {
-      setLoading(true);
-      setError('');
-      
-      console.log('Received answers from QuestionForm:', submittedAnswers);
-      
-      // Save the answers to state
-      setAnswers(submittedAnswers);
-      
-      // Make API call to submit answers (similar to Assessment.js)
-      // For now, simulate with dummy data
-      setTimeout(() => {
-        setAssessmentReport({
-          severity: 'low',
-          aiGeneratedReport: 'Based on your symptoms, you may have a common cold.',
-          symptoms: [assessment.symptoms],
-          responses: submittedAnswers,
-        });
-        
-        setActiveStep(5); // Move to confirmation step
-        setLoading(false);
-      }, 1500);
-      
-      // In actual implementation:
-      // const response = await assessmentService.submitAnswers(assessmentId, submittedAnswers);
-      // setAssessmentReport(response.data.data);
-      // setActiveStep(5);
-      
-    } catch (err) {
-      console.error('Error submitting answers:', err);
-      setError('Failed to submit your answers. Please try again.');
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Prepare assessment with questions and answers for backend submission
-   * This ensures all responses have both questionId and question
-   */
-  const prepareAssessmentData = () => {
-    console.log('Preparing assessment data with:', { 
-      questions, 
-      answers, 
-      assessment
-    });
-    
-    const formattedAssessment = {...assessment};
-    
-    // If we completed the AI assessment questionnaire
-    if (questions && questions.length > 0) {
-      console.log(`Found ${questions.length} questions to process`);
-      
-      // Include the questions in the assessment for reference
-      formattedAssessment.generatedQuestions = questions;
-      
-      // Format responses to include both questionId, question text, and answer
-      if (answers && answers.length > 0) {
-        console.log(`Found ${answers.length} answers to process`);
-        
-        // If we have an array of answer objects from QuestionForm submission
-        formattedAssessment.responses = answers.map(answerObj => {
-          return {
-            questionId: answerObj.questionId,
-            question: questions.find(q => q.questionId === answerObj.questionId)?.question || `Question ${answerObj.questionId}`,
-            answer: answerObj.answer
-          };
-        });
-      } else {
-        // No answers found in the expected format
-        console.log('No answers found in expected format, generating empty responses array');
-        formattedAssessment.responses = [];
-      }
-    } else {
-      console.log('No questions found, cannot generate properly formatted responses');
-      formattedAssessment.responses = [];
-    }
-    
-    console.log('Formatted assessment:', formattedAssessment);
-    return formattedAssessment;
   };
 
   const handleSubmit = async () => {
@@ -669,9 +301,10 @@ const ScheduleAppointment = () => {
       // Extract patientId from the response data
       const patientId = extractObjectId(patientData.data);
       
-      if (!patientId) {
-        throw new Error('Failed to extract valid patient ID');
-      }
+      // It's okay if patientId is null here, it's fetched separately
+      // if (!patientId) {
+      //   throw new Error('Failed to extract valid patient ID');
+      // }
       console.log('Using patientId:', patientId);
       
       // Extract the required IDs (accounting for different object formats)
@@ -711,13 +344,10 @@ const ScheduleAppointment = () => {
         }
       };
 
-      const formattedAssessment = prepareAssessmentData();
-      
-      console.log('Questions before submission:', questions);
-      console.log('Answers before submission:', answers);
+      // Remove assessment-specific data preparation
       
       const appointmentData = {
-        patientId: patientId,
+        patientId: patientId, // Use the fetched patientId state
         doctorId: doctorId,
         timeSlotId: timeSlotId,
         date: format(selectedDate, 'yyyy-MM-dd'),
@@ -728,13 +358,7 @@ const ScheduleAppointment = () => {
         reasonForVisit: assessment.symptoms, // Use primary symptom as reason
         additionalNotes: assessment.additionalNotes,
         isVirtual: appointmentType === 'virtual',
-        // Include the assessment data properly structured for the backend
-        assessment: {
-          symptoms: assessment.symptoms,
-          generatedQuestions: formattedAssessment.generatedQuestions || questions || [],
-          responses: formattedAssessment.responses || [],
-          severity: mapSeverity(assessment.severity)
-        }
+        // Remove assessment object and preliminaryAssessmentId
       };
       
       console.log('Final appointment data to submit:', appointmentData);
@@ -753,17 +377,17 @@ const ScheduleAppointment = () => {
         throw new Error(appointmentResult.message || 'Failed to schedule appointment');
       }
       
-      // Restore previous success navigation (e.g., to dashboard)
-      setLoading(false);
-      navigate('/dashboard', { state: { message: 'Appointment scheduled successfully!' } });
+      // Extract the actual ID string from the returned data object
+      const newAppointmentId = appointmentResult.data?._id;
+      if (!newAppointmentId) {
+          console.error('Failed to extract new appointment ID from response:', appointmentResult.data);
+          setError('Appointment booked, but failed to get ID for assessment step.');
+      }
       
-      // Remove redirection to assessment page
-      // const newAppointmentId = extractObjectId(appointmentResult.data);
-      // if (!newAppointmentId) {
-      //     console.error('Failed to extract new appointment ID from response:', appointmentResult.data);
-      //     throw new Error('Could not determine the new appointment ID.');
-      // }
-      // navigate(`/assessment/${newAppointmentId}`); 
+      // Navigate to the assessment page with the new appointment ID
+      // We also pass patientId which should be available in state
+      console.log(`Navigating to assessment for appointment ${newAppointmentId}, patient ${patientId}`);
+      navigate(`/assessment/new?appointmentId=${newAppointmentId}&patientId=${patientId}`);
 
     } catch (err) {
       console.error('Error submitting appointment:', err);
@@ -974,18 +598,17 @@ const ScheduleAppointment = () => {
       case 3:
         return (
           <Box sx={{ mt: 3 }}>
-            <Typography variant="h6" gutterBottom>Tell us about your symptoms</Typography>
+            <Typography variant="h6" gutterBottom>Reason for Visit (Optional)</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Please provide a brief description of your symptoms. This will help us prepare for your appointment.
+              Please provide a brief description of your symptoms or the reason for your visit. You can add more detail in the assessment step after booking.
             </Typography>
             
             <TextField
               fullWidth
-              required
-              label="What are your symptoms?"
+              label="Primary Symptoms / Reason for Visit"
               name="symptoms"
               value={assessment.symptoms}
-              onChange={handleAssessmentChange}
+              onChange={handleAssessmentInputChange}
               multiline
               rows={3}
               sx={{ mb: 2 }}
@@ -993,134 +616,18 @@ const ScheduleAppointment = () => {
             
             <TextField
               fullWidth
-              label="How long have you been experiencing these symptoms?"
-              name="duration"
-              value={assessment.duration}
-              onChange={handleAssessmentChange}
+              label="Additional Notes (Optional)"
+              name="additionalNotes"
+              value={assessment.additionalNotes}
+              onChange={handleAssessmentInputChange}
+              multiline
+              rows={3}
               sx={{ mb: 2 }}
             />
-            
-            <FormControl component="fieldset" sx={{ mb: 2 }}>
-              <FormLabel component="legend">Severity of Symptoms</FormLabel>
-              <RadioGroup
-                row
-                name="severity"
-                value={assessment.severity}
-                onChange={handleAssessmentChange}
-              >
-                <FormControlLabel value="mild" control={<Radio />} label="Mild" />
-                <FormControlLabel value="moderate" control={<Radio />} label="Moderate" />
-                <FormControlLabel value="severe" control={<Radio />} label="Severe" />
-              </RadioGroup>
-            </FormControl>
-            
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2 }}>
-              <Button
-                variant="outlined"
-                onClick={() => setActiveStep(prevStep => prevStep + 1)}
-                color="secondary"
-              >
-                Skip Assessment
-              </Button>
-              <Button
-                variant="contained"
-                onClick={handleStartAIAssessment}
-                disabled={loading || !assessment.symptoms}
-              >
-                {loading ? <CircularProgress size={24} /> : 'Continue to Assessment'}
-              </Button>
-            </Box>
           </Box>
         );
 
       case 4:
-        return (
-          <Box sx={{ mt: 3 }}>
-            <Typography variant="h6" gutterBottom>AI Assessment Questionnaire</Typography>
-            
-            {/* Timer Display */}
-            <Box sx={{ mb: 2 }}>
-              <Typography variant="subtitle2">
-                Time Remaining: {formatTime(timeRemaining)}
-              </Typography>
-              <LinearProgress 
-                variant="determinate" 
-                value={(timeRemaining / (10 * 60)) * 100} 
-                color={timeRemaining < 60 ? "error" : "primary"}
-                sx={{ mt: 1 }}
-              />
-            </Box>
-            
-            {loading ? (
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', my: 4 }}>
-                <CircularProgress />
-                <Typography sx={{ mt: 2 }}>Loading questions...</Typography>
-              </Box>
-            ) : (
-              <QuestionForm
-                questions={questions}
-                onSubmit={handleQuestionSubmit}
-                onSkip={handlePreferToDiscuss}
-                isLoading={loading}
-              />
-            )}
-            
-            {/* Time Warning Dialog (15 seconds remaining) */}
-            <Snackbar
-              open={showTimeWarning}
-              message="15 seconds remaining to complete assessment"
-              severity="warning"
-              autoHideDuration={5000}
-              onClose={() => setShowTimeWarning(false)}
-            />
-            
-            {/* Time Expired Dialog (10:00) */}
-            <Dialog
-              open={showTimeExpired && !showFinalPrompt}
-              onClose={() => setShowTimeExpired(false)}
-            >
-              <DialogTitle>Time's Up!</DialogTitle>
-              <DialogContent>
-                <DialogContentText>
-                  Your assessment time has expired. Would you like to quickly complete the 
-                  remaining questions, or would you prefer to discuss your symptoms directly with the doctor?
-                </DialogContentText>
-              </DialogContent>
-              <DialogActions>
-                <Button onClick={handlePreferToDiscuss} color="secondary">
-                  Prefer to Discuss with Doctor
-                </Button>
-                <Button onClick={() => setShowTimeExpired(false)} color="primary" autoFocus>
-                  Complete Remaining Questions
-                </Button>
-              </DialogActions>
-            </Dialog>
-            
-            {/* Final Prompt Dialog (10:30) */}
-            <Dialog
-              open={showFinalPrompt}
-              onClose={() => setShowFinalPrompt(false)}
-            >
-              <DialogTitle>Assessment Auto-Saved</DialogTitle>
-              <DialogContent>
-                <DialogContentText>
-                  Your assessment progress has been auto-saved. Would you like to continue answering the 
-                  remaining questions, or would you prefer to discuss your symptoms directly with the doctor?
-                </DialogContentText>
-              </DialogContent>
-              <DialogActions>
-                <Button onClick={handlePreferToDiscuss} color="secondary">
-                  Prefer to Discuss with Doctor
-                </Button>
-                <Button onClick={() => setShowFinalPrompt(false)} color="primary" autoFocus>
-                  Continue Assessment
-                </Button>
-              </DialogActions>
-            </Dialog>
-          </Box>
-        );
-
-      case 5:
         return (
           <Box sx={{ mt: 3 }}>
             <Paper sx={{ p: 3 }}>
@@ -1150,31 +657,11 @@ const ScheduleAppointment = () => {
                     <strong>Primary Symptoms:</strong> {assessment.symptoms || 'Not specified'}
                   </Typography>
                 </Grid>
-                
-                {/* AI Assessment Summary */}
-                {!preferToDiscussWithDoctor && assessmentReport && (
-                  <Grid item xs={12}>
-                    <Typography>
-                      <strong>Assessment Completed:</strong> Yes
-                    </Typography>
-                    <Typography color="text.secondary">
-                      {preferToDiscussWithDoctor 
-                        ? 'You chose to discuss your symptoms directly with the doctor.'
-                        : 'Your assessment has been completed and will be shared with your doctor.'}
-                    </Typography>
-                  </Grid>
-                )}
-                
-                {preferToDiscussWithDoctor && (
-                  <Grid item xs={12}>
-                    <Typography>
-                      <strong>Assessment Status:</strong> Will discuss with doctor
-                    </Typography>
-                    <Typography color="text.secondary">
-                      You've chosen to discuss your symptoms directly with the doctor.
-                    </Typography>
-                  </Grid>
-                )}
+                <Grid item xs={12}> 
+                  <Typography>
+                    <strong>Additional Notes:</strong> {assessment.additionalNotes || 'None'}
+                  </Typography>
+                </Grid>
               </Grid>
             </Paper>
           </Box>
@@ -1209,7 +696,7 @@ const ScheduleAppointment = () => {
         {renderStepContent(activeStep)}
 
         <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
-          {activeStep > 0 && activeStep !== 4 && ( // Can't go back from AI questionnaire once started
+          {activeStep > 0 && (
             <Button onClick={handleBack} sx={{ mr: 1 }}>
               Back
             </Button>
@@ -1224,7 +711,7 @@ const ScheduleAppointment = () => {
               {loading ? <CircularProgress size={24} /> : 'Schedule Appointment'}
             </Button>
           ) : (
-            activeStep !== 3 && activeStep !== 4 && ( // Hide for symptom input and AI questionnaire (they have their own buttons)
+            activeStep < steps.length - 1 && (
               <Button variant="contained" onClick={handleNext}>
                 Next
               </Button>

@@ -22,6 +22,7 @@ import {
   dataMiddleware,
   cacheMiddleware
 } from '../middleware/index.mjs';
+import assessmentController from '../controllers/assessmentController.mjs'; // Import controller
 
 const router = express.Router();
 
@@ -99,6 +100,16 @@ router.put(
   validationMiddleware.validate(updatePatientValidation),
   auditMiddleware.logUpdate('patient-profile'),
   updateMyProfileWithDI
+);
+
+// Route to start an assessment for the patient
+router.post(
+  '/:patientId/assessments/start',
+  authMiddleware.restrictTo('patient'), // Ensure only the patient can start
+  // TODO: Add permission check: ensure req.user.id corresponds to the :patientId requested 
+  // or that the user has permissions (e.g. staff creating for patient)
+  auditMiddleware.logCreation('assessment'), // Log the creation of an assessment resource
+  assessmentController.startAssessment // Use the existing controller logic
 );
 
 // Admin/Staff/Doctor routes

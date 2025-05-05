@@ -17,7 +17,7 @@ class AssessmentController {
   async startAssessment(req, res, next) {
     try {
       const { appointmentId, symptoms } = req.body;
-      const { id: patientIdFromParam } = req.params; // Get patient ID from URL param
+      const { patientId: patientIdFromParam } = req.params; // Get patient ID from URL param named 'patientId'
       const userId = req.user?._id; // ID of the user performing the action (for audit)
 
       // Use patientId from URL parameter primarily

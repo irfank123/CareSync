@@ -11,13 +11,12 @@ const { protect, restrictTo, bypassAuth } = authMiddleware;
 
 // --- Routes under /assessments ---
 
-// Start assessment (expects appointmentId, symptoms in body)
-// This deviates from the original `/patients/:id/assessments/start` 
-// to be more resource-oriented around the assessment itself.
-// The patient context can be inferred from authentication or passed in body.
+// Start assessment (expects patientId, symptoms in body)
+// Using /start path as defined in this file.
 router.post(
     '/start', 
-    bypassAuth, // Replace with protect, restrictTo('patient') later
+    protect, // Apply authentication check
+    restrictTo('patient'), // Ensure only patients can start
     assessmentController.startAssessment
 );
 
