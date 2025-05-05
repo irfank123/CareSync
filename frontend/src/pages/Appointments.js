@@ -264,16 +264,6 @@ const Appointments = () => {
         <Typography variant="h4" component="h1">
           {isDoctor ? 'Appointments Schedule' : 'My Appointments'}
         </Typography>
-        {!isDoctor && (
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={<CalendarMonth />}
-            onClick={handleOpenDialog}
-          >
-            Book New Appointment
-          </Button>
-        )}
       </Box>
       
       {/* Snackbar for showing error messages */}

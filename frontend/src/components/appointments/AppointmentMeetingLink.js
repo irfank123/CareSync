@@ -5,8 +5,10 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { axiosInstance } from '../../services/api';
 import { toast } from 'react-toastify';
+import { useAuth } from '../../context/AuthContext';
 
 const AppointmentMeetingLink = ({ appointment, onMeetingLinkGenerated }) => {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [currentMeetingLink, setCurrentMeetingLink] = useState(appointment?.googleMeetLink || appointment?.videoConferenceLink || null);
@@ -15,6 +17,7 @@ const AppointmentMeetingLink = ({ appointment, onMeetingLinkGenerated }) => {
     setCurrentMeetingLink(appointment?.googleMeetLink || appointment?.videoConferenceLink || null);
   }, [appointment?.googleMeetLink, appointment?.videoConferenceLink]);
 
+  const isDoctor = user?.role === 'doctor';
   const hasExistingLink = !!currentMeetingLink;
   
   const handleGenerateMeetingLink = async () => {
@@ -76,24 +79,26 @@ const AppointmentMeetingLink = ({ appointment, onMeetingLinkGenerated }) => {
         </Alert>
       )}
       
-      <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-         <Button
-            variant="contained"
-            startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <VideoCallIcon />}
-            onClick={handleGenerateMeetingLink}
-            disabled={loading}
-          >
-            {loading ? 'Generating...' : (hasExistingLink ? 'Regenerate Google Meet Link' : 'Generate Google Meet Link')}
-          </Button>
-         {hasExistingLink && (
-             <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                (Re)generates a new link, replacing the existing one.
-             </Typography>
-         )}
-      </Box>
+      {isDoctor && (
+        <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+           <Button
+              variant="contained"
+              startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <VideoCallIcon />}
+              onClick={handleGenerateMeetingLink}
+              disabled={loading}
+            >
+              {loading ? 'Generating...' : (hasExistingLink ? 'Regenerate Google Meet Link' : 'Generate Google Meet Link')}
+            </Button>
+           {hasExistingLink && (
+               <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                  (Re)generates a new link, replacing the existing one.
+               </Typography>
+           )}
+        </Box>
+      )}
 
       {currentMeetingLink && (
-        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mt: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mt: isDoctor ? 2 : 1 }}>
           <Typography 
             variant="body2" 
             component="div" 

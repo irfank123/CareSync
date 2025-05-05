@@ -110,7 +110,9 @@ const AppointmentDetails = () => {
   };
 
   // Use our utility function in getAppointmentId
-  const getAppointmentId = () => {    
+  // Wrap getAppointmentId in useCallback to stabilize its identity if needed elsewhere,
+  // though for useMemo below, it's the calculated ID value that matters.
+  const getAppointmentId = React.useCallback(() => {    
     // Try to get ID from URL params first
     const urlId = safeObjectId(id);
     if (urlId) {
@@ -149,10 +151,13 @@ const AppointmentDetails = () => {
     // Nothing valid found
     console.log('No valid appointment ID found in any source');
     return null;
-  };
+  }, [id, queryId]); // Dependencies for getAppointmentId
+
+  // Calculate the appointment ID once and memoize it
+  const appointmentId = React.useMemo(() => getAppointmentId(), [getAppointmentId]);
 
   useEffect(() => {
-    const appointmentId = getAppointmentId();
+    // Now use the memoized appointmentId
     console.log('Initial appointment ID check:', appointmentId);
     
     if (!appointmentId) {
@@ -174,12 +179,11 @@ const AppointmentDetails = () => {
     
     console.log('Using cleaned appointment ID:', cleanId);
     fetchAppointment(cleanId);
-  }, []);
+  }, [appointmentId]); // Depend on the memoized ID
 
   // Fetch assessment data for this appointment
   useEffect(() => {
-    const appointmentId = getAppointmentId();
-    
+    // Use the memoized appointmentId
     if (!appointmentId) {
       console.log('No appointment ID available yet for assessment fetch');
       return;
@@ -268,17 +272,19 @@ const AppointmentDetails = () => {
     };
     
     fetchAssessmentData();
-  }, [isDoctor, isPatient]);
+  }, [appointmentId, isDoctor, isPatient]); // Depend on ID and roles
 
   // Fetch timeslot data when appointment data is available
   useEffect(() => {
-    if (appointment && appointment.timeSlotId) {
-      console.log('Found timeslot ID in appointment:', appointment.timeSlotId);
-      fetchTimeslot(appointment.timeSlotId);
+    // Depend on the specific timeslot ID from the appointment state
+    const timeslotIdToFetch = appointment?.timeSlotId;
+    if (timeslotIdToFetch) {
+      console.log('Found timeslot ID in appointment:', timeslotIdToFetch);
+      fetchTimeslot(timeslotIdToFetch);
     } else {
       console.log('No timeSlotId found in appointment data:', appointment);
     }
-  }, [appointment]);
+  }, [appointment?.timeSlotId]); // Depend specifically on the timeslot ID
 
   const fetchTimeslot = async (timeslotId) => {
     if (!timeslotId) {
