@@ -1,4 +1,3 @@
-
 # CareSync - Telehealth Application
 
 ## Overview
@@ -44,8 +43,8 @@ Follow these instructions to set up and run the project locally.
    ⁠ bash
    git clone https://github.com/irfank123/CareSync.git
    cd CareSync
-    ⁠
-2. *Set up and run the Backend:*
+2. .env's in the project deliverable - one for front end and one for backend ⁠
+3. *Set up and run the Backend:*
 
    * Navigate to the backend directory:
      ⁠ bash
@@ -62,7 +61,7 @@ Follow these instructions to set up and run the project locally.
        npm run dev
         ⁠
        The backend server will typically run on a port specified in your environment variables or configuration (e.g., ⁠ http://localhost:5001 ⁠).
-3. *Set up and run the Frontend:*
+4. *Set up and run the Frontend:*
 
    * Navigate to the frontend directory (from the project root, so if you are in ⁠ CareSync/backend ⁠, type ⁠ cd ../frontend ⁠):
      ⁠ bash
@@ -127,14 +126,6 @@ This project is currently in development. Key UI components for the frontend hav
 •⁠  ⁠Physician availability management interface (Frontend)
 •⁠  ⁠Appointment scheduling interface (Frontend)
 •⁠  ⁠Core backend setup with Express.js and Mongoose
-
-### In Progress
-
-•⁠  ⁠Full backend API implementation
-•⁠  ⁠Authentication system (Frontend & Backend)
-•⁠  ⁠Virtual consultation interface (Frontend, WebRTC integration)
-•⁠  ⁠Health assessment form (Frontend)
-•⁠  ⁠Digital prescription system (Frontend & Backend)
 
 ## Roadmap
 
