@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.mjs",
     "dev": "node --require dotenv/config src/server.mjs",
-    "test": "jest --coverage"
+    "test": "jest --coverage --testTimeout=30000"
   },
   "keywords": [],
   "author": "",
@@ -46,6 +46,7 @@
     "@babel/core": "^7.27.1",
     "@babel/preset-env": "^7.27.2",
     "babel-jest": "^29.7.0",
-    "jest": "^29.7.0"
+    "jest": "^29.7.0",
+    "supertest": "^6.3.4"
   }
 }
