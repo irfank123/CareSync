@@ -111,7 +111,8 @@ class ClinicService {
       if (error instanceof AppError) {
         throw error;
       }
-      throw new AppError('Failed to create clinic: ' + error.message, 500);
+      // Ensure consistent error messaging for generic failures during user update
+      throw new AppError('Failed to update user record: ' + error.message, 500);
     } finally {
       session.endSession();
     }

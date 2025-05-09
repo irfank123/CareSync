@@ -575,10 +575,14 @@ class AppointmentService {
       }
       // --- END Auto Google Meet Link Generation ---
 
+      // console.log('[SERVICE DEBUG] Before commitTransaction'); // DEBUG LINE REMOVED
       await session.commitTransaction();
+      // console.log('[SERVICE DEBUG] After commitTransaction'); // DEBUG LINE REMOVED
 
       // Populate necessary fields before returning
+      // console.log(`[SERVICE DEBUG] Before getAppointmentById for ID: ${appointment[0]._id}`); // DEBUG LINE REMOVED
       const populatedAppointment = await this.getAppointmentById(appointment[0]._id);
+      // console.log('[SERVICE DEBUG] After getAppointmentById'); // DEBUG LINE REMOVED
       return populatedAppointment;
 
     } catch (error) {

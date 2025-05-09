@@ -77,15 +77,16 @@ class AppError extends Error {
   
   /**
    * Development environment error handler
-   * @param {Error} err - Error object
+   * @param {Error} processedError - Processed error object
+   * @param {Error} originalError - Original error object
    * @param {Object} res - Express response object
    */
-  const sendDevError = (err, res) => {
-    res.status(err.statusCode || 500).json({
+  const sendDevError = (processedError, originalError, res) => {
+    res.status(processedError.statusCode || 500).json({
       success: false,
-      message: err.message,
-      error: err,
-      stack: err.stack
+      message: processedError.message,
+      error: processedError,
+      stack: originalError.stack
     });
   };
   
@@ -160,7 +161,7 @@ class AppError extends Error {
     
     // Send appropriate error response based on environment
     if (process.env.NODE_ENV === 'development') {
-      sendDevError(error, res);
+      sendDevError(error, err, res);
     } else {
       sendProdError(error, res);
     }
