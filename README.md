@@ -1,3 +1,4 @@
+
 # CareSync - Telehealth Application
 
 ## Overview
@@ -6,66 +7,95 @@ CareSync is a comprehensive telehealth platform designed to bridge the gap betwe
 
 ## Features
 
-- 🩺 **Physician Availability Management**: Doctors can set and manage their availability through an intuitive calendar interface
-- 📅 **Smart Appointment Scheduling**: Patients can book appointments based on real-time doctor availability
-- 🔍 **Preliminary Health Assessments**: AI-assisted symptom analysis and initial health evaluations
-- 💻 **Virtual Consultations**: Secure video conferencing for remote medical consultations
-- 💊 **Digital Prescriptions**: Electronic prescription management system
-
-## Demo
-
-The application currently features functional implementations of:
-
-- Doctor availability management dashboard
-- Patient appointment scheduling interface
+•⁠  ⁠🩺 *Physician Availability Management*: Doctors can set and manage their availability through an intuitive calendar interface
+•⁠  ⁠📅 *Smart Appointment Scheduling*: Patients can book appointments based on real-time doctor availability
+•⁠  ⁠🔍 *Preliminary Health Assessments*: AI-assisted symptom analysis and initial health evaluations
+•⁠  ⁠💻 *Virtual Consultations*: Secure video conferencing for remote medical consultations
+•⁠  ⁠💊 *Digital Prescriptions*: Electronic prescription management system
 
 ## Technologies
 
 ### Frontend
 
-- React.js with TypeScript
-- Tailwind CSS for styling
-- Context API for state management
-- WebRTC for video conferencing (planned)
+•⁠  ⁠React.js with TypeScript
+•⁠  ⁠Tailwind CSS for styling
+•⁠  ⁠Context API for state management
 
-### Backend (Planned)
+### Backend
 
-- Node.js with Express
-- PostgreSQL database
-- JWT authentication
-- RESTful API architecture
+•⁠  ⁠Node.js with Express.js
+•⁠  ⁠MongoDB (using Mongoose)
+•⁠  ⁠JWT authentication
+•⁠  ⁠RESTful API architecture
+•⁠  ⁠Google Meets API
+
+## Prerequisites
+
+Before you begin, ensure you have met the following requirements:
+
+* You have installed Node.js (v14.0.0 or later) and npm (v6.0.0 or later). You can download them from [https://nodejs.org/](https://nodejs.org/).
+* You have a running instance of MongoDB.
 
 ## Getting Started
 
-### Prerequisites
+Follow these instructions to set up and run the project locally.
 
-- Node.js (v14.0.0 or later)
-- npm (v6.0.0 or later)
-
-### Installation
-
-1. Clone the repository
-
-   ```bash
+1. *Clone the repository:*
+   ⁠ bash
    git clone https://github.com/irfank123/CareSync.git
    cd CareSync
-   ```
-2. Install frontend dependencies
+    ⁠
+2. *Set up and run the Backend:*
 
-   ```bash
-   cd frontend
-   npm install
-   ```
-3. Start the development server
+   * Navigate to the backend directory:
+     ⁠ bash
+     cd backend
+      ⁠
+   * Install dependencies:
+     ⁠ bash
+     npm install
+      ⁠
+   * Create a ⁠ .env ⁠ file in the ⁠ backend ⁠ directory if needed, based on ⁠ .env.example ⁠ or project requirements (e.g., for database connection strings, JWT secrets, etc.).
+   * Start the backend server:
+     * For development (uses ⁠ dotenv/config ⁠ for environment variables and may include features like hot reloading):
+       ⁠ bash
+       npm run dev
+        ⁠
+       The backend server will typically run on a port specified in your environment variables or configuration (e.g., ⁠ http://localhost:5001 ⁠).
+3. *Set up and run the Frontend:*
 
-   ```bash
-   npm start
-   ```
-4. Open your browser and navigate to http://localhost:3000
+   * Navigate to the frontend directory (from the project root, so if you are in ⁠ CareSync/backend ⁠, type ⁠ cd ../frontend ⁠):
+     ⁠ bash
+     cd frontend
+      ⁠
+   * Install dependencies:
+     ⁠ bash
+     npm install
+      ⁠
+   * Start the frontend development server:
+     ⁠ bash
+     npm start
+      ⁠
+   * Open your browser and navigate to ⁠ http://localhost:3000 ⁠.
+
+## Running Tests and Generating Coverage Reports
+
+This project uses Jest for testing the backend and ⁠ react-scripts ⁠ (which uses Jest underneath) for the frontend.
+
+### Backend Tests & Coverage
+
+1. Navigate to the ⁠ backend ⁠ directory:
+   ⁠ bash
+   cd backend
+    ⁠
+2. Run the tests. This command will also generate a coverage report because ⁠ --coverage ⁠ is included in the script defined in ⁠ backend/package.json ⁠ (⁠ "test": "jest --coverage --testTimeout=30000" ⁠):
+   ⁠ bash
+   npm test
+    ⁠
+   A coverage summary will be displayed in the console. A detailed HTML coverage report can be found in the ⁠ backend/coverage/lcov-report/index.html ⁠ file.
 
 ## Project Structure
 
-```
 CareSync/
 ├── Deliverables/        # Project documentation
 ├── frontend/
@@ -83,68 +113,49 @@ CareSync/
 │   │   └── index.tsx    # Application entry point
 │   ├── tailwind.config.js
 │   └── tsconfig.json
-└── backend/             # Backend code (coming soon)
-```
+└── backend/
+    ├── src/             # Backend source code (e.g., server.mjs, routes, controllers, models)
+    └── package.json     # Backend dependencies and scripts
 
 ## Current Status
 
-This project is currently in the development phase. The frontend component structure has been established and key UI components have been implemented. Backend services are planned for future development.
+This project is currently in development. Key UI components for the frontend have been implemented, and backend services are being developed.
 
 ### Implemented
 
-- Project structure and architecture
-- Physician availability management interface
-- Appointment scheduling interface
+•⁠  ⁠Project structure and architecture for frontend and backend
+•⁠  ⁠Physician availability management interface (Frontend)
+•⁠  ⁠Appointment scheduling interface (Frontend)
+•⁠  ⁠Core backend setup with Express.js and Mongoose
 
 ### In Progress
 
-- Authentication system
-- Virtual consultation interface
-- Health assessment form
-- Digital prescription system
+•⁠  ⁠Full backend API implementation
+•⁠  ⁠Authentication system (Frontend & Backend)
+•⁠  ⁠Virtual consultation interface (Frontend, WebRTC integration)
+•⁠  ⁠Health assessment form (Frontend)
+•⁠  ⁠Digital prescription system (Frontend & Backend)
 
 ## Roadmap
 
-1. **Phase 1: Frontend Structure & Core UI (Current)**
-
-   - Set up project architecture
-   - Implement key UI components
-   - Create responsive design
-2. **Phase 2: Authentication & State Management**
-
-   - Implement user authentication
-   - Add global state management
-   - Create protected routes
-3. **Phase 3: Backend Development**
-
-   - Build RESTful API
-   - Set up database
-   - Implement business logic
-4. **Phase 4: Video Consultations & Advanced Features**
-
-   - Integrate WebRTC for video
-   - Add prescription system
-   - Implement notifications
-
-## Contributing
-
-We welcome contributions to the CareSync project! Please follow these steps to contribute:
-
-1. Fork the repository
-2. Create a new branch (`git checkout -b feature/your-feature-name`)
-3. Commit your changes (`git commit -m 'Add some feature'`)
-4. Push to the branch (`git push origin feature/your-feature-name`)
-5. Open a Pull Request
-
-Please ensure your code follows the project's coding standards and includes appropriate tests.
+1. *Phase 1: Frontend Structure & Core UI (Largely Complete)*
+   * Set up project architecture
+   * Implement key UI components
+   * Create responsive design
+2. *Phase 2: Backend Development & Initial API (In Progress)*
+   * Build RESTful API with Node.js, Express, MongoDB
+   * Implement core business logic for scheduling and user management
+   * Set up database schemas
+3. *Phase 3: Authentication & State Management*
+   * Implement user authentication (JWT)
+   * Integrate frontend with backend authentication
+   * Refine global state management in frontend
+   * Create protected routes
+4. *Phase 4: Video Consultations & Advanced Features*
+   * Integrate WebRTC for video consultations
+   * Add prescription system functionality
+   * Implement notifications
 
 ## Contact
 
 Project Link: [https://github.com/irfank123/CareSync](https://github.com/irfank123/CareSync)
-
-
-
-
-# Tests
-
-- test connection at - http://localhost:3000/test

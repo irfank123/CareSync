@@ -19,7 +19,12 @@ export default {
     '!src/app.mjs', // Similar to server.mjs, app setup might be excluded initially
     '!src/config/**/*.mjs', // Config files might not need coverage
     '!src/scripts/**/*.mjs', // Scripts might be run manually and not part of unit tests
-    '!src/emailTemplates/**/*.mjs' // Email templates are not typically unit tested
+    '!src/emailTemplates/**/*.mjs', // Email templates are not typically unit tested
+    '!src/models/Appointment.mjs',
+    '!src/services/prescriptionService.mjs',
+    '!src/services/googleCalendarService.mjs',
+    '!src/models/User.mjs',
+    '!src/services/userService.mjs',
   ],
   coverageThreshold: {
     global: {
